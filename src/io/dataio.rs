@@ -2,8 +2,11 @@ extern crate uuid;
 use crate::io::*;
 use crate::time::Duration as local_duration;
 use std::convert::AsMut;
-use std::ops::{Shr, Shl};
+use std::ops::{Shr, Shl, DerefMut, Deref};
 use crate::version::Version;
+use std::mem::{self,MaybeUninit};
+use std::borrow::Borrow;
+
 
 enum ByteOrder{
     BigEndian = 0,
@@ -21,43 +24,72 @@ pub trait BinaryIOReadable{
     fn read(din: &mut dyn DataInput) -> Result<Self,&'static str>;
 }
 
-impl<T:BinaryIOReadable,S:DataInput> Shr<&mut T> for &mut S {
-    type Output = Self;
+pub trait ReadTo{
+    fn read_to(&mut self,din:&mut dyn DataInput) -> Result<&Self,&'static str>;
+}
 
-    fn shr(self, rhs: &mut T) -> Self::Output {
-        match T::read(self){
-            Ok(t) =>{
-                *rhs = t;
-                self
+impl<T: BinaryIOReadable> ReadTo for T{
+    fn read_to(&mut self, din: &mut dyn DataInput) -> Result<&mut Self, &'static str> {
+        match Self::read(din){
+            Ok(val) =>{
+                *self = val;
+                Ok(self)
             },
-            Err(msg) => panic!(msg)
+            Err(e) => Err(e)
         }
     }
 }
 
-impl<S: DataInput> Shr<&mut[u8]> for &mut S{
-    type Output = Self;
-
-    fn shr(self, rhs: &mut [u8]) -> Self::Output {
-        match self.readFully(rhs){
-            Ok(_) => self,
-            Err(msg) => panic!(msg)
-        }
-    }
-}
-
-impl<T: BinaryIOReadable,S:DataInput> Shr<&mut[T]> for &mut S{
-    type Output = Self;
-    fn shr(self,rhs:&mut [T]) -> Self::Output{
-        for mut t in rhs{
-            match T::read(self){
-                Ok(val) => *t = val,
-                Err(e) => panic!(e)
+impl<T: BinaryIOReadable,Sz: usize> BinaryIOReadable for [T;Sz]{
+    fn read(din: &mut dyn DataInput) -> Result<Self, &'static str> {
+        unsafe{
+            let mut a: MaybeUninit<Self> = MaybeUninit::uninit();
+            let mut ptr = a.as_mut_ptr() as *mut T;
+            for i in [0..Sz]{
+                std::ptr::write(ptr.offset(i),T::read(din)?);
             }
+            return Ok(a.assume_init())
+        } //Yes this is unsafe. I'm doing the unsafe stuff correctly though
+    }
+}
+
+
+impl<T: ReadTo> ReadTo for [T]{
+    fn read_to(&mut self,din: &mut dyn DataInput) -> Result<&Self,&'static str>{
+        for a in self{
+            a.read_to(din)?;
         }
+        Ok(self)
+    }
+}
+
+impl<T: ReadTo> ReadTo for Box<T>{
+    fn read_to(&mut self, din: &mut dyn DataInput) -> Result<&Self, &'static str> {
+        self.deref_mut().read_to(din)?;
         self
     }
 }
+
+impl ReadTo for [u8]{
+    fn read_to(&mut self, din: &mut DataInput) -> Result<&Self, &'static str> {
+        din.readFully(self)?;
+        Ok(self)
+    }
+}
+
+
+impl<T:ReadTo,S:DataInput> Shr<&mut T> for &mut S {
+    type Output = Self;
+
+    fn shr(self, rhs: &mut T) -> Self::Output {
+        match rhs.read_to(din){
+            Ok(_) => self,
+            Err(e) => panic!(e)
+        }
+    }
+}
+
+
 
 impl BinaryIOReadable for u8 {
     fn read(din: &mut dyn DataInput) -> Result<Self,&'static str>{
@@ -71,16 +103,13 @@ impl BinaryIOReadable for i8 {
 }
 
 impl BinaryIOReadable for bool{
-    fn read(din: &mut DataInput) -> Result<Self, &'static str> {
-        din.readSingle().and_then(|v| {
-            if v == 0{
-                return Ok(false)
-            }else if v==1{
-                return Ok(true)
-            }else{
-                Err("Invalid bool value")
-            }
-        })
+    fn read(din: &mut dyn DataInput) -> Result<Self, &'static str> {
+        match din.readSingle(){
+            Ok(0) => Ok(false),
+            Ok(1) => Ok(true),
+            Ok(_)=> Err("invalid bool value"),
+            Err(e) => Err(e)
+        }
     }
 }
 
@@ -341,7 +370,7 @@ impl DataInputStream{
 }
 
 impl InputStream for DataInputStream{
-    fn read(&mut self, out: &mut [u8]) -> usize {
+    fn read(&mut self, out: &mut [u8]) -> Status {
         self.wrapped.read(out)
     }
 
@@ -349,7 +378,7 @@ impl InputStream for DataInputStream{
         self.wrapped.readByte()
     }
 
-    fn check_status(&self) -> Status {
+    fn last_error(&self) -> Status {
         self.wrapped.check_status()
     }
 
@@ -360,10 +389,16 @@ impl InputStream for DataInputStream{
 
 impl DataInput for DataInputStream{
     fn readFully(&mut self, out: &mut [u8]) -> Result<(), &'static str> {
-        if self.read(out) != out.len() {
-            Err("Unfulfilled read")
-        }else {
-            Ok(())
+        match self.read(out){
+            Status::Ok(sz) =>{
+                if sz==out.len(){
+                    Ok(())
+                }else{
+                    Err("Read not fufilled")
+                }
+            },
+            Status::Error(e) => Err(e.to_string()),
+            Status::Eof => Err("Eof on Stream")
         }
     }
 
@@ -386,7 +421,7 @@ trait DataOutput{
     fn byte_order(&self) -> ByteOrder;
 }
 
-trait BinaryIOWritable{
+pub(crate) trait BinaryIOWritable{
     fn write(&self,out:&mut dyn DataOutput);
 }
 
@@ -560,13 +595,19 @@ impl BinaryIOWritable for i128{
     }
 }
 
+
 impl BinaryIOWritable for local_duration{
-    fn write(&self, out: &mut DataOutput) {
+    fn write(&self, out: &mut dyn DataOutput) {
         self.get_seconds().write(out);
         self.get_nanos().write(out);
     }
 }
 
 
+impl<T: BinaryIOWritable> BinaryIOWritable for Box<T>{
+    fn write(&self, out: &mut DataOutput) {
+        self.borrow().write(out)
+    }
+}
 
 

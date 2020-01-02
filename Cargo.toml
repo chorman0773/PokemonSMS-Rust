@@ -14,3 +14,4 @@ uuid = { version = "0.8.1", features = ["v1","v3","v4","v5"]}
 openssl = { version = "0.10", features = ["vendored"] }
 getrandom = "0.1.13"
 zeroize = "1.1.0"
+pokemonsms-derive = { path = "derive_proc_macros/pokemonsms-derive"}
