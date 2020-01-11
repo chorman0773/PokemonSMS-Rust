@@ -1,5 +1,7 @@
 #![allow(non_camel_case_types)]
 
+
+
 use crate::io::dataio::{BinaryIOReadable, DataInput, BinaryIOWritable};
 use self::uuid::Uuid;
 
@@ -41,10 +43,10 @@ impl Default for UUID{
 }
 
 impl BinaryIOReadable for UUID{
-    fn read(din: &mut dyn DataInput) -> Result<Self, &'static str> {
+    fn read(din: &mut dyn DataInput) -> Result<Self, std::string::String> {
         u64::read(din).and_then(|val|{
             u64::read(din).and_then(|val2|{
-                Ok(uuid(val,val2))
+                Ok(UUID(val,val2))
             })
         })
     }
@@ -76,7 +78,7 @@ impl BinaryIOWritable for uuid::Uuid{
 }
 
 impl BinaryIOReadable for uuid::Uuid{
-    fn read(din: &mut dyn DataInput) -> Result<Self, &'static str> {
+    fn read(din: &mut dyn DataInput) -> Result<Self, std::string::String> {
         Ok(UUID::read(din)?.into())
     }
 }

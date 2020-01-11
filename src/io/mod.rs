@@ -1,6 +1,6 @@
 
 use std::borrow::BorrowMut;
-use std::ops::{DerefMut, Shr};
+use std::ops::{DerefMut, Shr, Try};
 use std::io::Read;
 
 
@@ -13,7 +13,7 @@ pub enum Status{
 
 impl Default for Status{
     fn default() -> Self {
-        Ok(0)
+        Status::Ok(0)
     }
 }
 
@@ -42,6 +42,36 @@ impl From<&Status> for Result<usize,std::string::String>{
     }
 }
 
+enum StatusError{
+    Error(std::string::String),
+    Eof
+}
+
+
+impl Try for Status{
+    type Ok = usize;
+    type Error = StatusError;
+
+    fn into_result(self) -> Result<Self::Ok, Self::Error> {
+        match self{
+            Status::Ok(sz)=> Ok(sz),
+            Status::Error(str) => StatusError::Error(str),
+            Status::Eof => StatusError::Eof
+        }
+    }
+
+    fn from_error(v: Self::Error) -> Self {
+        match v{
+            StatusError::Error(str) => Status::Error(str),
+            StatusError::Eof => Status::Eof
+        }
+    }
+
+    fn from_ok(v: Self::Ok) -> Self {
+        Status::Ok(v)
+    }
+}
+
 pub trait InputStream{
     fn read(&mut self,out:&mut [u8]) -> Status;
     fn readByte(&mut self) -> Option<u8>;
@@ -59,4 +89,4 @@ pub trait OutputStream{
 
 pub mod dataio;
 pub mod dev;
-mod cipher;
+

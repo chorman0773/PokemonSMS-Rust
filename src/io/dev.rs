@@ -1,6 +1,6 @@
-use crate::io::{InputStream, Status, OutputStream};
-use crate::io::Status::{Error, Eof};
 
+use crate::io::{InputStream, Status, OutputStream};
+use Status::{Error, Eof};
 extern crate getrandom;
 
 #[derive(Default)]
@@ -61,7 +61,7 @@ impl InputStream for ZeroDevice{
             *b = 0;
         }
         sz = out.len();
-        return Ok(sz);
+        return Status::Ok(sz);
     }
 
     fn readByte(&self) -> Option<u8> {
@@ -111,7 +111,7 @@ pub struct RandomDevice{
 
 impl Default for RandomDevice{
     fn default() -> Self {
-        RandomDevice{err: None}
+        RandomDevice{err: Status::Ok(0)}
     }
 }
 
@@ -143,7 +143,7 @@ impl InputStream for RandomDevice{
     }
 
     fn clear_error(&mut self) -> () {
-        self.err = None;
+        self.err = Status::Ok(0);
     }
 }
 

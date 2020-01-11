@@ -1,12 +1,12 @@
 use std::fmt::{Debug, Formatter, Error};
 
-#[derive(Default,Eq,Copy,Clone,Ord,Hash)]
+#[derive(Default,Eq,PartialEq,Copy,Clone,Ord,PartialOrd,Hash)]
 pub struct Version{
     major: u8,
     minor: u8
 }
 
-#[derive(Eq,Copy,Hash)]
+#[derive(Eq,PartialEq,Copy,Clone,Hash)]
 pub struct VersionRange{
     lower: Version,
     upper: Version
@@ -22,17 +22,19 @@ impl Debug for Version{
 }
 
 impl VersionRange{
-    pub fn in_range(&self,v:Version) -> bool{
+    const ALL_VERSIONS: VersionRange = VersionRange(Version(0,0),Version(255,255));
+    const NO_VERSIONS: VersionRange = VersionRange(Version(0,1),Version(0,0));
+    pub const fn in_range(&self,v:Version) -> bool{
         return lower <= v && v<=upper;
     }
-    pub fn check_range(&self,v:Version) -> Option<Version>{
+    pub const fn check_range(&self,v:Version) -> Option<Version>{
         if in_range(v) {
             return Some(v)
         }else {
             return None
         }
     }
-    pub fn clamp(&self,v:Version) -> Version{
+    pub const fn clamp(&self,v:Version) -> Version{
         if lower > v{
             return lower
         }else if upper < v{
@@ -44,8 +46,8 @@ impl VersionRange{
 }
 
 impl Version{
-    pub const v1_0: Version = Version{major: 0,minor: 0};
-    pub fn new(major:u16,minor:u8) -> Option<Version>{
+    pub const v1_0: Version = Version(0,0);
+    pub const fn new(major:u16,minor:u8) -> Option<Version>{
         if major > 256{
             None
         }else{
@@ -62,18 +64,18 @@ impl Version{
     pub fn to_serial(self) -> u16{
         return (self.major as u16) << 8 | self.minor as u16;
     }
-    pub fn origin(self) -> Version{
+    pub const fn origin(self) -> Version{
         Version{major,minor:0}
     }
 
-    pub fn same_origin(self) -> VersionRange{
+    pub const fn same_origin(self) -> VersionRange{
         return VersionRange{ lower: origin(), upper: self }
     }
 
 }
 
 impl From<Version> for VersionRange{
-    fn from(v: Version) -> Self {
+    const fn from(v: Version) -> Self {
         VersionRange{lower:v,upper:v}
     }
 }

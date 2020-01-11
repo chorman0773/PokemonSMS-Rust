@@ -22,6 +22,8 @@ pub enum NBTTag{
     UUID(UUID)
 }
 
+const TAG_ANY_NUMERIC: u8 = 99;
+
 impl NBTTag{
     fn new_from_tag_type(tag: u8) -> Option<Self>{
         match tag{
@@ -65,10 +67,6 @@ impl NBTTag{
             NBTTag::UUID(_) => 15
         }
     }
-
-    fn byte_value(&self) -> Option<i8>{
-        match
-    }
 }
 
 impl Default for NBTTag{
@@ -92,7 +90,7 @@ fn read_length_array<T: BinaryIOReadable + Copy>(arr:&mut Box<[T]>,din: &mut dyn
 }
 
 impl ReadTo for NBTTag{
-    fn read_to(&mut self, din: &mut dyn DataInput) -> Result<&Self, &'static str> {
+    fn read_to<Input: DataInput>(&mut self, din: &mut Input) -> Result<&Self, &'static str> {
         match self {
             NBTTag::End => Ok(self),
             NBTTag::Byte(val)
@@ -121,7 +119,7 @@ impl ReadTo for NBTTag{
 }
 
 impl BinaryIOWritable for NBTTag{
-    fn write(&self, out: &mut dyn DataOutput) {
+    fn write<S: DataOutput>(&self, out: &mut S) {
         match self{
             NBTTag::End => Ok(self),
             NBTTag::Byte(val)
@@ -145,23 +143,23 @@ impl BinaryIOWritable for NBTTag{
                     a.write(out);
                 }
             }
-        }
+        };
     }
 }
 
 #[derive(Clone)]
 pub struct List{
-    tag_type: std::mem::Discriminant<NBTTag>,
+    tag_type: u8,
     list : std::vec::Vec<NBTTag>
 }
 
 impl List{
     fn add(&mut self,tag: &NBTTag) -> Option<&NBTTag>{
         if self.list.is_empty() {
-            tag_type = std::mem::discriminant(tag);
+            tag_type = tag.get_tag_type();
             self.list.push(tag.clone());
             self.list.last()
-        }else if tag_type == std::mem::discriminant(tag){
+        }else if tag_type == tag.get_tag_type(){
             self.list.push(tag.clone());
             self.list.last()
         }else {
@@ -172,7 +170,7 @@ impl List{
 
 impl Default for List{
     fn default() -> Self {
-        Self{tag_type: std::mem::discriminant(&NBTTag::End),list: std::vec::Vec::new()}
+        Self{tag_type: 0,list: std::vec::Vec::new()}
     }
 }
 
@@ -186,21 +184,31 @@ impl<'a> std::iter::IntoIterator for &'a List{
 }
 
 impl ReadTo for List{
-    fn read_to(&mut self, din: &mut dyn DataInput) -> Result<&Self, &'static str> {
+    fn read_to<S: DataInput>(&mut self, din: &mut S) -> Result<&Self, std::string::String> {
         self.list.clear();
         let tag_type = u8::read(din)?;
         let len = i32::read(din)?;
         if len < 0 {
-            Err("length must not be negative")
+            Err("length must not be negative".to_string())
         }
         self.list.reserve(len as usize);
-        self.tag_type = std::mem::discriminant(&NBTTag::new_from_tag_type(tag_Type).ok_or("Invalid Tag Type")?);
+        self.tag_type = tag_type;
         for i in 0..len{
-            let mut tag = NBTTag::new_from_tag_type(tag_type).unwrap();
-            tag.read_to(din);
+            let mut tag = NBTTag::new_from_tag_type(tag_type).ok_or_else(||"Invalid Tag Type".to_string())?;
+            tag.read_to(din)?;
             self.list.push(tag);
         }
         Ok(self)
+    }
+}
+
+impl BinaryIOWritable for List{
+    fn write<S: DataOutput>(&self, out: &mut S) {
+        self.tag_type.write(out);
+        self.len.write(out);
+        for tag in &self.list{
+            tag.write(out);
+        }
     }
 }
 
@@ -210,5 +218,47 @@ pub struct Compound{
 }
 
 impl Compound{
+    pub fn put(&mut self,name: std::string::String,tag: NBTTag){
+        self.underlying.insert(name,tag);
+    }
+    pub fn get(&self,name: &std::string::String) -> Option<&NBTTag>{
+        self.underlying.get(name)
+    }
+    pub fn get_mut(&mut self,name: &std::string::String) -> Option<&mut NBTTag>{
+        self.underlying.get_mut(name)
+    }
+    pub fn get_or<'a,'b,'c: 'a+'b>(&'a self,name: &std::string::String,other:&'b NBTTag) ->&'c NBTTag{
+        if let Some(tag) = self.get(name){
+            tag
+        }else{
+            other
+        }
+    }
+}
 
+impl ReadTo for Compound{
+    fn read_to<Input: DataInput>(&mut self, din: &mut Input) -> Result<&Self, String> {
+        self.underlying.clear();
+        loop{
+            let tag_type = u8::read(din)?;
+            if tag_type == 0{
+                break;
+            }
+            let name = std::string::String::read(din)?;
+            let mut tag = NBTTag::new_from_tag_type(tag_type).ok_or_else(||"Invalid Tag Type".to_string())?;
+            tag.read_to(din)?;
+            self.underlying.insert(name,tag);
+        };
+        Ok(self)
+    }
+}
+
+impl BinaryIOWritable for Compound{
+    fn write<S: DataOutput>(&self, out: &mut S) {
+        for (key,value) in &self.underlying{
+            value.get_tag_type().write(out);
+            key.write(out);
+            value.write(out);
+        }
+    }
 }
