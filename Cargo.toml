@@ -6,8 +6,20 @@ edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+client = ["clientcore","servercore"]
+server = ["servercore","pkmcom"]
+clientcore = []
+servercore = []
+lan = ["pkmcom","pkmcom_multicast"]
+dss = ["lan","pkmcom","pkmcom_multicast"]
+pkmcom = ["pkmcom_tcp"]
+pkmcom_bluetooth = []
+pkmcom_tcp = []
+pkmcom_multicast = []
+
 [dependencies]
-lua = '0.0.10'
+rlua = "0.17.0"
 json = '0.12.0'
 socket = "0.0.7"
 uuid = { version = "0.8.1", features = ["v1","v3","v4","v5"]}
@@ -15,3 +27,5 @@ openssl = { version = "0.10", features = ["vendored"] }
 getrandom = "0.1.13"
 zeroize = "1.1.0"
 pokemonsms-derive = { path = "derive_proc_macros/pokemonsms-derive"}
+regex = "1"
+lazy_static = "1.4.0"

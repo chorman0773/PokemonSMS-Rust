@@ -363,7 +363,7 @@ pub struct DataInputStream<'a,Stream: InputStream>{
 }
 
 impl<'a,Stream: InputStream> DataInputStream<'a,Stream>{
-    fn new(wrapped: &'a mut Stream,endianness: ByteOrder) -> Self{
+    pub(crate) fn new(wrapped: &'a mut Stream, endianness: ByteOrder) -> Self{
         DataInputStream{wrapped,endianness}
     }
 }
@@ -420,7 +420,7 @@ impl<'a,'b: 'a,S: InputStream> From<DataInputStream<'a,S>> for DataInputStream<'
     }
 }
 
-trait DataOutput{
+pub trait DataOutput{
     fn writeBytes(&mut self,bytes:&[u8]);
     fn writeByte(&mut self,byte:u8);
     fn byte_order(&self) -> ByteOrder;
@@ -607,7 +607,7 @@ impl<T: BinaryIOWritable> BinaryIOWritable for Box<T>{
     }
 }
 
-struct DataOutputStream<'a,S: OutputStream>{
+pub struct DataOutputStream<'a,S: OutputStream>{
     wrapped: &'a mut S,
     endianness: ByteOrder
 }
@@ -662,14 +662,14 @@ impl<'a,'b: 'a,S: OutputStream> From<DataOutputStream<'a,S>> for DataOutputStrea
 
 
 impl BinaryIOWritable for !{
-    fn write<S: DataOutput>(&self, out: &mut S) {
-        unsafe{ std::intrinsics::unreachable()}
+    fn write<S: DataOutput>(self, out: &mut S) {
+        self
     }
 }
 
 impl ReadTo for !{
-    fn read_to<Input: DataInput>(&mut self, din: &mut Input) -> Result<&Self, String> {
-        unsafe{ std::intrinsics::unreachable()}
+    fn read_to<Input: DataInput>(self, din: &mut Input) -> Result<&Self, String> {
+        self
     }
 }
 
