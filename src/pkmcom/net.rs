@@ -87,7 +87,7 @@ pub unsafe trait NetHandler{
 
 pub unsafe trait NetController{
     type Handler: NetHandler;
-    fn accept(&mut self) -> &mut Self::Handler;
+    fn accept(&mut self) -> Option<&mut Self::Handler>;
     fn listen(addr: Addr) -> Result<Self>;
 }
 
@@ -170,5 +170,30 @@ unsafe impl<Serv: Service> NetHandler for Handler<Serv>{
     fn connect(addr: Self::Addr) -> Result<Self> {
         let service = Serv::connect(addr)?;
         Ok(Self{service,remote: false})
+    }
+}
+
+impl<Serv: Service> Drop for Handler<Serv>{
+    fn drop(&mut self) {
+        self.close()
+    }
+}
+
+struct Controller<Serv: Service>{
+    service: Serv,
+    inner: Vec<Handler<Serv>>
+}
+
+unsafe impl<Serv: Service> NetController for Controller<Serv>{
+    type Handler = Handler<Serv>;
+
+    fn accept(&mut self) -> Option<&mut Self::Handler> {
+        let handler = self.service.accept()?;
+        self.inner.push(Handler::new(handler,true));
+        self.inner.last_mut()
+    }
+
+    fn listen(addr: Self::Addr) -> Result<Self> {
+        Ok(Self{service: Serv::listen(addr)?,inner: Vec::new()})
     }
 }

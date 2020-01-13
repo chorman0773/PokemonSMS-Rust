@@ -146,6 +146,12 @@ impl EventHandler for LuaEventBus{
     }
 }
 
+pub struct NullEventBus;
+
+impl EventHandler for NullEventBus{
+    fn handle<E: Event>(&mut self, event: &E) {}
+}
+
 
 
 

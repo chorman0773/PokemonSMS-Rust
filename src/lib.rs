@@ -12,3 +12,5 @@ pub mod core;
 
 #[cfg(feature="pkmcom")]
 pub mod pkmcom;
+
+pub mod random;
