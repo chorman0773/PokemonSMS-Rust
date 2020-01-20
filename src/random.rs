@@ -104,20 +104,9 @@ impl Random{
         }
         match bytes.len()%4{
             0 => {},
-            1 => {
+            i @ 1..3 => {
                 let val = unsafe{self.next::<u32>(32)};
-                bytes[4*max] = val as u8;
-            },
-            2 => {
-                let val = unsafe{self.next::<u32>(32)};
-                bytes[4*max] = val as u8;
-                bytes[4*max+1] = (val>>8) as u8;
-            },
-            3 => {
-                let val = unsafe{self.next::<u32>(32)};
-                bytes[4*max] = val as u8;
-                bytes[4*max+1] = (val>>8) as u8;
-                bytes[4*max+2] = (val>>16) as u8;
+                (0..i).for_each(|i| bytes[4 * max + i] = (val >> (8 * i) as u32) as u8);
             },
             _ => unsafe{ std::intrinsics::unreachable()}
         }

@@ -4,7 +4,9 @@ extern crate lazy_static;
 extern crate regex;
 
 use std::convert::{TryFrom, TryInto};
-use std::ops::Index;
+use std::ops::{Index, Deref};
+use std::cell::Cell;
+use std::sync::RwLock;
 
 #[derive(Clone,PartialEq,PartialOrd,Eq,Ord,Hash)]
 pub struct ResourceLocation{
@@ -31,7 +33,7 @@ lazy_static!{
 }
 
 impl ResourceLocation{
-    pub fn new(domain: std::string::String,path: std::string::String) -> Result<ResourceLocation,std::string::String>{
+    pub const fn new(domain: std::string::String,path: std::string::String) -> Result<ResourceLocation,std::string::String>{
         if !DOMAIN_PATTERN.is_match(&domain) || !PATH_PATTERN.is_match(&path){
             Err(r"Resource Locations must match: [a-z_][a-z0-9_]*:[a-z_][a-z0-9_]*(\\[a-z_][a-z0-9_]*)*".to_string())
         }else{
@@ -40,24 +42,10 @@ impl ResourceLocation{
     }
 }
 
-impl TryFrom<&std::string::String> for ResourceLocation{
+impl<S: AsRef<str>> TryFrom<&S> for ResourceLocation{
     type Error = std::string::String;
 
-    fn try_from(value: &String) -> Result<Self, Self::Error> {
-        if !PATTERN.is_match(value){
-            Err(r"Resource Locations must match: [a-z_][a-z0-9_]*:[a-z_][a-z0-9_]*(\\[a-z_][a-z0-9_]*)*".to_string())
-        }else{
-            let mut split = value.split(':');
-            let domain = split.next().unwrap().to_string();
-            let path = split.next().unwrap().to_string();
-            Ok(ResourceLocation{domain,path})
-        }
-    }
-}
-impl TryFrom<&str> for ResourceLocation{
-    type Error = std::string::String;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
+    fn try_from(value: &S) -> Result<Self, Self::Error> {
         if !PATTERN.is_match(value){
             Err(r"Resource Locations must match: [a-z_][a-z0-9_]*:[a-z_][a-z0-9_]*(\\[a-z_][a-z0-9_]*)*".to_string())
         }else{
@@ -100,13 +88,44 @@ impl<E: RegistryEntry> Registry<E>{
             Ok(self.underlying.get_mut(&name).unwrap())
         }
     }
+
+    pub fn iter(&self) -> impl Iterator<Item=&E>{
+        self.underlying.iter().map(|(_,o)|o)
+    }
 }
+
+
 
 impl<E: RegistryEntry,Q: TryInto<ResourceLocation>> Index<&Q> for Registry<E>{
     type Output = E;
 
     fn index(&self, index: &Q) -> &Self::Output {
         &self.underlying[&index.try_into().unwrap()]
+    }
+}
+
+pub struct RegistryObject<'a, E: RegistryEntry>{
+    registry: &'a Registry<E>,
+    name: ResourceLocation,
+    obj: RwLock<Option<&'a E>>
+}
+
+impl<'a, E: RegistryEntry> RegistryObject<'a,E>{
+    pub fn new(registry: &'a Registry<E>,name: ResourceLocation) -> Self{
+        Self{registry,name,obj: RwLock::new(None)}
+    }
+}
+
+impl<'a,E: RegistryEntry> Deref for RegistryObject<'a,E>{
+    type Target = E;
+
+    fn deref(&self) -> &'a Self::Target {
+        if let Some(o) = *self.obj.read()? {
+            o
+        }else{
+            *self.obj.write()? = Some(&self.registry[&self.name])
+            *self.obj.read()?.unwrap()
+        }
     }
 }
 

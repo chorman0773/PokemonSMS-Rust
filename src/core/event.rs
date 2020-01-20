@@ -41,7 +41,7 @@ impl<'a,'b: 'a> From<&EventKeyWrapper<'a>> for EventKeyWrapper<'b>{
 }
 
 impl<'a> UserData for EventKeyWrapper<'a>{
-    fn add_methods<'lua: 'a,M: UserDataMethods<'lua, Self>>(methods: &mut M){
+    fn add_methods<'lua,M: UserDataMethods<'lua, Self>>(methods: &mut M){
         methods.add_meta_function(MetaMethod::Eq,|ctx,args: (EventKeyWrapper<'a>,EventKeyWrapper<'a>)|{
             let (a,b) = args;
             if a.0.type_id() != b.0.type_id(){
@@ -75,8 +75,8 @@ impl<E: Event,EH: EventHandler> FnMut(&E)->() for EH{
 pub struct LuaHandler<'lua>(pub rlua::Function<'lua>,pub rlua::Function<'lua>);
 impl<'lua> UserData for LuaHandler<'lua>{}
 
-pub struct LuaEventBus{
-    ctx: rlua::Lua,
+pub struct LuaEventBus<'a>{
+    ctx: &'a rlua::Lua,
     events: Option<rlua::RegistryKey>
 }
 
@@ -88,8 +88,8 @@ impl Drop for LuaEventBus{
     }
 }
 
-impl LuaEventBus{
-    pub fn new(ctx: rlua::Lua) -> Self{
+impl<'a> LuaEventBus<'a>{
+    pub fn new(ctx: &'a rlua::Lua) -> Self{
         Self{ctx,events: None}
     }
     pub fn init(&mut self) -> rlua::Result<&rlua::RegistryKey>{
@@ -103,10 +103,14 @@ impl LuaEventBus{
     }
     fn register<'lua>(ctx: rlua::Context<'lua>,bus: &mut Self,vals: (EventKeyWrapper<'static>, rlua::Function<'lua>, rlua::Function<'lua>)) -> rlua::Result<&Self>{
         let (key,pred,handler) = vals;
+        let predreg = ctx.create_registry_value(pred)?;
+        let handlerreg = ctx.create_registry_value(handler)?;
         bus.ctx.context(|ctx| {
-            let wrapped = LuaHandler(pred, handler);
+            let wrapped = LuaHandler(ctx.registry_value(&predreg)?, ctx.registry_value(&handlerreg)?);
+            ctx.remove_registry_value(predreg)?;
+            ctx.remove_registry_value(handlerreg)?;
             let rkey = bus.init()?;
-            let mut tab = bus.ctx.registry_value::<rlua::Table>(rkey)?;
+            let mut tab: rlua::Table = bus.ctx.registry_value(rkey)?;
             tab.raw_set(key, wrapped)?;
         })?;
         Ok(bus)

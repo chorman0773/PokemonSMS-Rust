@@ -356,6 +356,12 @@ impl<T: BinaryIOReadable> BinaryIOReadable for Option<T>{
     }
 }
 
+impl<T: BinaryIOReadable> BinaryIOReadable for Box<T>{
+    fn read<Input: DataInput>(din: &mut Input) -> Result<Self, String> {
+        T::read(din).map(|val|Box::new(val))
+    }
+}
+
 
 pub struct DataInputStream<'a,Stream: InputStream>{
     wrapped: &'a mut Stream,

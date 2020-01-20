@@ -1,6 +1,13 @@
 pub use crate::core::Side::{Client, Server};
 
+#[macro_use]
+extern crate lazy_static;
+
 pub mod event;
+pub mod text;
+pub mod ability;
+
+pub mod events;
 
 pub enum Side{
     Server,

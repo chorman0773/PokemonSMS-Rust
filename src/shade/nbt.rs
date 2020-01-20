@@ -1,4 +1,4 @@
-use crate::io::dataio::{BinaryIOWritable, DataInput, BinaryIOReadable, ReadTo};
+use crate::io::dataio::{BinaryIOWritable, DataInput, BinaryIOReadable, ReadTo, DataOutput};
 use std::borrow::Borrow;
 use crate::uuid::{uuid, UUID};
 
