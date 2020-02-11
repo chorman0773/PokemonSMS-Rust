@@ -269,6 +269,46 @@ pub enum TextComponent{
     Empty
 }
 
+impl Default for TextComponent{
+    fn default() -> Self {
+        Empty
+    }
+}
+
+impl TextComponent{
+    pub fn translate<S: ToString>(v: &S) -> Self{
+        TextComponent::Translation(v.to_string(),None)
+    }
+
+    pub fn text<S: ToString>(v: &S) -> Self{
+        Text(v.to_string(),None,None)
+    }
+    pub fn style_text<S: ToString>(v: &S,style: Style) -> Self{
+        Text(v.to_string(),Some(style),None)
+    }
+    pub fn icon<S: TryInto<ResourceLocation>>(key: S) -> Self{
+        Icon(key.try_into().ok().unwrap(),None)
+    }
+
+    pub fn concatenate(self,other: Self) -> Self{
+        match self{
+            Empty => Group(vec![other]),
+            Group(mut v)=>{
+                v.push(other);
+                Group(v)
+            },
+            Text(text,style,Some(next)) => Text(text,style,Some(box next.concatenate(other))),
+            Text(text,style,None) => Text(text,style,Some(box other)),
+            val => Group(vec![val, other])
+        }
+    }
+
+    pub fn replace<F: FnOnce(Self)->Self>(&mut self, f: F){
+        let val = std::mem::take(self);
+        *self = f(val);
+    }
+}
+
 pub use TextComponent::*;
 use rlua::prelude::LuaValue;
 use rlua::{FromLua, Context, Value, Error};
@@ -392,4 +432,10 @@ impl<'lua> FromLua<'lua> for TextComponent{
     fn from_lua(lua_value: Value<'lua>, lua: Context<'lua>) -> Result<Self, Error> {
         TextComponent::try_from(&lua_value)
     }
+}
+
+pub trait TextDisplay{
+    fn set_style(&mut self,s: &Style);
+    fn execute_command(&mut self,c: &TextCommand);
+
 }

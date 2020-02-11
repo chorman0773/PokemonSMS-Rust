@@ -2,6 +2,9 @@ use crate::core::text::TextComponent;
 use crate::registry::{ResourceLocation, RegistryEntry};
 use crate::core::event::EventHandler;
 
+#[macro_use]
+extern crate lazy_static;
+
 pub enum TypeModifier{
     WEAKNESS,
     RESISTANCE,
@@ -60,5 +63,13 @@ impl Type{
     pub fn get_event_handler(&self) -> &dyn EventHandler{
         *self.handler
     }
+
+
 }
 
+lazy_static!{
+        static ref TYPE_REGISTRY: Registry<Type> = {
+           let reg: Registry<Type> = Registry::new();
+           let typeless = Type::new();
+        }
+}

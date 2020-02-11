@@ -76,7 +76,7 @@ pub struct Registry<E: RegistryEntry + Sync>{
     locked: RwLock<bool>
 }
 
-impl<E: RegistryEntry> Registry<E>{
+impl<E: RegistryEntry + Sync> Registry<E>{
     pub fn new() -> Registry<E>{
         Self{underlying: RwLock::new(std::collections::BTreeMap::new()),..Default::default()}
     }

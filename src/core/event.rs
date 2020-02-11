@@ -62,7 +62,7 @@ pub trait Event {
 }
 
 pub trait EventHandler{
-    fn handle<E: Event>(&mut self,event: &E);
+    fn handle(&mut self,event: &dyn Event);
 }
 
 impl<E: Event,EH: EventHandler> FnMut(&E)->() for EH{
@@ -134,7 +134,7 @@ impl UserData for LuaEventBus{
 }
 
 impl EventHandler for LuaEventBus{
-    fn handle<E: Event>(&mut self, event: &E) {
+    fn handle(&mut self, event: &dyn Event) {
         if let Some(rkey) = self.events.as_ref(){
             self.ctx.context(|ctx|{
                 let tab: rlua::Table = ctx.registry_value(rkey)?;
@@ -153,7 +153,7 @@ impl EventHandler for LuaEventBus{
 pub struct NullEventBus;
 
 impl EventHandler for NullEventBus{
-    fn handle<E: Event>(&mut self, event: &E) {}
+    fn handle(&mut self, event: &dyn Event) {}
 }
 
 
