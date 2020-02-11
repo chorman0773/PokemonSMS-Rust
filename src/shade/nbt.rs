@@ -1,6 +1,6 @@
-use crate::io::dataio::{BinaryIOWritable, DataInput, BinaryIOReadable, ReadTo, DataOutput};
 use std::borrow::Borrow;
 use crate::uuid::{uuid, UUID};
+use crate::io::{Readable, ReadCopy, DataInput, Writeable, DataOutput};
 
 #[derive(Clone)]
 pub enum NBTTag{
@@ -75,7 +75,7 @@ impl Default for NBTTag{
     }
 }
 
-fn read_length_array<T: BinaryIOReadable + Copy>(arr:&mut Box<[T]>,din: &mut dyn DataInput) -> Result<&Box<[T]>,&'static str>{
+fn read_length_array<T: BinaryIOReadable + Copy,S: DataInput>(arr:&mut Box<[T]>,din: &mut S) -> Result<&Box<[T]>,&'static str>{
     let len = i32::read(din)?;
     if len < 0{
         Err("length must not be negative")
@@ -89,8 +89,8 @@ fn read_length_array<T: BinaryIOReadable + Copy>(arr:&mut Box<[T]>,din: &mut dyn
     Ok(arr)
 }
 
-impl ReadTo for NBTTag{
-    fn read_to<Input: DataInput>(&mut self, din: &mut Input) -> Result<&Self, &'static str> {
+impl Readable for NBTTag{
+    fn read_from<Input: DataInput>(&mut self, din: &mut Input) -> Result<&Self, &'static str> {
         match self {
             NBTTag::End => Ok(self),
             NBTTag::Byte(val)
@@ -118,28 +118,52 @@ impl ReadTo for NBTTag{
     }
 }
 
-impl BinaryIOWritable for NBTTag{
+impl Writeable for NBTTag{
     fn write<S: DataOutput>(&self, out: &mut S) {
         match self{
             NBTTag::End => Ok(self),
-            NBTTag::Byte(val)
-            | NBTTag::Short(val)
-            | NBTTag::Int(val)
-            | NBTTag::Long(val)
-            | NBTTag::Float(val)
-            | NBTTag::Double(val)
-            | NBTTag::String(val)
-            | NBTTag::List(val)
-            | NBTTag::Compound(val)
-            | NBTTag::UUID(val) => val.write(out),
-            NBTTag::ByteArray(arr)
-            | NBTTag::IntArray(arr)
-            | NBTTag::LongArray(arr)
-            | NBTTag::FloatArray(arr)
-            | NBTTag::DoubleArray(arr) => {
+            NBTTag::Byte(val) => val.write(out),
+            NBTTag::Short(val)  => val.write(out),
+            NBTTag::Int(val)  => val.write(out),
+            NBTTag::Long(val)  => val.write(out),
+            NBTTag::Float(val)  => val.write(out),
+            NBTTag::Double(val) => val.write(out),
+            NBTTag::String(val)=> val.write(out),
+            NBTTag::List(val)=> val.write(out),
+            NBTTag::Compound(val) => val.write(out),
+            NBTTag::UUID(val) => val.write(out),
+            NBTTag::ByteArray(arr) => {
                 let sz = arr.len() as i32;
                 sz.write(out);
-                for a in *arr{
+                for a in arr.iter(){
+                    a.write(out);
+                }
+            }
+            NBTTag::IntArray(arr) => {
+                let sz = arr.len() as i32;
+                sz.write(out);
+                for a in arr.iter(){
+                a.write(out);
+                }
+            }
+            NBTTag::LongArray(arr) => {
+                let sz = arr.len() as i32;
+                sz.write(out);
+                for a in arr.iter(){
+                    a.write(out);
+                }
+            }
+            NBTTag::FloatArray(arr) => {
+            let sz = arr.len() as i32;
+            sz.write(out);
+            for a in arr.iter(){
+            a.write(out);
+            }
+            }
+            NBTTag::DoubleArray(arr) => {
+                let sz = arr.len() as i32;
+                sz.write(out);
+                for a in arr.iter(){
                     a.write(out);
                 }
             }
@@ -166,6 +190,10 @@ impl List{
             None
         }
     }
+
+    fn iter(&self) -> impl Iterator<Item=&NBTTag>{
+        self.list.iter()
+    }
 }
 
 impl Default for List{
@@ -174,14 +202,6 @@ impl Default for List{
     }
 }
 
-impl<'a> std::iter::IntoIterator for &'a List{
-    type Item = NBTTag;
-    type IntoIter = std::slice::Iter<'a,Self::Item>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.list.into_iter()
-    }
-}
 
 impl ReadTo for List{
     fn read_to<S: DataInput>(&mut self, din: &mut S) -> Result<&Self, std::string::String> {
@@ -236,8 +256,8 @@ impl Compound{
     }
 }
 
-impl ReadTo for Compound{
-    fn read_to<Input: DataInput>(&mut self, din: &mut Input) -> Result<&Self, String> {
+impl Readable for Compound{
+    fn read_from<Input: DataInput>(&mut self, din: &mut Input) -> Result<&Self, String> {
         self.underlying.clear();
         loop{
             let tag_type = u8::read(din)?;
@@ -253,7 +273,7 @@ impl ReadTo for Compound{
     }
 }
 
-impl BinaryIOWritable for Compound{
+impl Writeable for Compound{
     fn write<S: DataOutput>(&self, out: &mut S) {
         for (key,value) in &self.underlying{
             value.get_tag_type().write(out);

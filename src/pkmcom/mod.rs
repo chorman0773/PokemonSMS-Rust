@@ -292,3 +292,13 @@ PkmComHash for (B,C,D,E,F,G,H,I,J,K,A){
         b.size()+c.size()+d.size()+e.size()+f.size()+g.size()+h.size()+i.size()+j.size()+k.size()+l.size()+a.size()
     }
 }
+
+impl PkmComHash for !{
+    fn hashcode(&self) -> Wrapping<u32> {
+        self.clone()
+    }
+
+    fn size(&self) -> u32 {
+        self.clone()
+    }
+}

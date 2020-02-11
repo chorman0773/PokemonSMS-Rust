@@ -5,7 +5,10 @@ extern crate lazy_static;
 
 pub mod event;
 pub mod text;
+
 pub mod ability;
+pub mod moves;
+pub mod types;
 
 pub mod events;
 

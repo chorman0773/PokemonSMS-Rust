@@ -29,3 +29,4 @@ zeroize = "1.1.0"
 pokemonsms-derive = { path = "derive_proc_macros/pokemonsms-derive"}
 regex = "1"
 lazy_static = "1.4.0"
+cryptostream = "0.3"

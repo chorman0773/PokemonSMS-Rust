@@ -1,8 +1,8 @@
 use crate::io;
 use crate::pkmcom::PkmComHash;
 use std::num::Wrapping;
-use crate::io::{InputStream, OutputStream};
-use crate::io::dataio::{DataOutputStream, BinaryIOWritable, DataInputStream, BinaryIOReadable};
+use std::io::{Write, Read};
+use crate::io::{ReadCopy, Writeable};
 
 #[derive(PartialEq,Eq)]
 pub enum Side{
@@ -76,6 +76,24 @@ impl<A: Packet,B: Packet> Packet for Tie<A,B>{
 }
 
 
+impl Packet for !{
+    fn packet_id(&self) -> u8 {
+        self.clone() //Shut up CLion, ! is Copy
+    }
+
+    fn write_packet<S: io::dataio::DataOutput>(&self, out: &mut S) {
+        self.clone()
+    }
+
+    fn read_packet<S: io::dataio::DataInput>(&mut self, din: &mut S) -> Result<()> {
+        self.clone()
+    }
+
+    fn create(id: u8) -> Option<!> {
+        None
+    }
+}
+
 pub unsafe trait NetHandler{
     type Addr;
     fn send_packet<P: Packet>(&mut self,packet: P);
@@ -86,42 +104,51 @@ pub unsafe trait NetHandler{
 }
 
 pub unsafe trait NetController{
-    type Handler: NetHandler;
+    type Addr;
+    type Handler: NetHandler<Addr=Self::Addr>;
     fn accept(&mut self) -> Option<&mut Self::Handler>;
-    fn listen(addr: Addr) -> Result<Self>;
+    fn listen(addr: Self::Addr) -> Result<Self>;
+    fn close(&mut self);
+    fn for_each_remote<F: FnMut(&mut Self::Handler)->()>(&mut self, f: F);
 }
 
 pub trait ProtocolErrorHandler{
     fn handle_protocol_error<Handler: NetHandler>(&self,handler:&mut Handler,s: &std::string::String);
 }
 
+pub trait Connection{
+    type Addr;
+    type InputStream : Read;
+    type OutputStream: Write;
+    fn input_stream(&mut self) -> Option<&mut Self::InputStream>;
+    fn output_stream(&mut self) -> Option<&mut Self::OutputStream>;
+    fn close(&mut self);
+}
+
 pub trait Service{
     type Addr;
-    type InputStream : InputStream;
-    type OutputStream: OutputStream;
+    type Connection: Connection<Addr=Self::Addr>;
     fn get_name() -> &'static str;
     fn addr_from_pair(addr: std::string::String,port: u16) -> Addr;
     fn add_to_pair(addr: Addr) -> (std::string::String,u16);
     fn listen(addr: Addr) -> Result<Self>;
-    fn connect(addr: Addr) -> Result<Self>;
-    fn input_stream(&mut self) -> Option<&mut Self::InputStream>;
-    fn output_stream(&mut self) -> Option<&mut Self::OutputStream>;
-    fn accept(&mut self) -> Option<Self>;
+    fn connect(addr: Addr) -> Result<Self::Connection>;
+    fn accept(&mut self) -> Option<Self::Connection>;
     fn close(&mut self);
 }
 
-pub struct Handler<Serv: Service>{
+pub struct Handler<Serv: Connection>{
     service: Serv,
     remote: bool
 }
 
-impl<Serv: Service> Handler<Serv>{
+impl<Serv: Connection> Handler<Serv>{
     pub fn new(srv: Serv,remote: bool) -> Self{
         Self{service: srv,remote}
     }
 }
 
-unsafe impl<Serv: Service> NetHandler for Handler<Serv>{
+unsafe impl<Serv: Connection> NetHandler for Handler<Serv>{
     type Addr = Serv::Addr;
 
     fn send_packet<P: Packet>(&mut self, packet: P) {
@@ -181,12 +208,12 @@ impl<Serv: Service> Drop for Handler<Serv>{
 
 struct Controller<Serv: Service>{
     service: Serv,
-    inner: Vec<Handler<Serv>>
+    inner: Vec<Handler<Serv::Connection>>
 }
 
 unsafe impl<Serv: Service> NetController for Controller<Serv>{
+    type Addr = Serv::Addr;
     type Handler = Handler<Serv>;
-
     fn accept(&mut self) -> Option<&mut Self::Handler> {
         let handler = self.service.accept()?;
         self.inner.push(Handler::new(handler,true));
@@ -195,5 +222,14 @@ unsafe impl<Serv: Service> NetController for Controller<Serv>{
 
     fn listen(addr: Self::Addr) -> Result<Self> {
         Ok(Self{service: Serv::listen(addr)?,inner: Vec::new()})
+    }
+
+    fn close(&mut self) {
+        self.inner.iter_mut().for_each(|r|r.close());
+        self.service.close()
+    }
+
+    fn for_each_remote<F: FnMut(&mut Self::Handler) -> ()>(&mut self, f: F) {
+        self.inner.iter_mut().for_each(f)
     }
 }

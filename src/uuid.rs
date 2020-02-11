@@ -2,8 +2,8 @@
 
 
 
-use crate::io::dataio::{BinaryIOReadable, DataInput, BinaryIOWritable};
-use self::uuid::Uuid;
+use crate::io::{DataInput, ReadCopy, Writeable, DataOutput};
+use uuid::Uuid;
 
 extern crate uuid;
 
@@ -12,7 +12,7 @@ extern crate uuid;
 pub struct UUID(pub(crate) u64,pub(crate) u64);
 
 impl UUID{
-    pub const nil: UUID = UUID(0,0);
+    pub const NIL: UUID = UUID(0,0);
 }
 
 impl From<(u64,u64)> for UUID{
@@ -42,8 +42,8 @@ impl Default for UUID{
     }
 }
 
-impl BinaryIOReadable for UUID{
-    fn read(din: &mut dyn DataInput) -> Result<Self, std::string::String> {
+impl ReadCopy for UUID{
+    fn read<S: DataInput>(din: &mut S) -> Result<Self, std::string::String> {
         u64::read(din).and_then(|val|{
             u64::read(din).and_then(|val2|{
                 Ok(UUID(val,val2))
@@ -52,8 +52,8 @@ impl BinaryIOReadable for UUID{
     }
 }
 
-impl BinaryIOWritable for UUID{
-    fn write(&self, out: &mut DataOutput) {
+impl Writable for UUID{
+    fn write<S: DataOutput>(&self, out: &mut S) {
         self.0.write(out);
         self.1.write(out);
     }
@@ -71,14 +71,14 @@ impl From<UUID> for uuid::Uuid{
     }
 }
 
-impl BinaryIOWritable for uuid::Uuid{
-    fn write(&self, out: &mut DataOutput) {
+impl Writeable for uuid::Uuid{
+    fn write<S: DataOutput>(&self, out: &mut S) {
         UUID::from(self).write(out);
     }
 }
 
-impl BinaryIOReadable for uuid::Uuid{
-    fn read(din: &mut dyn DataInput) -> Result<Self, std::string::String> {
+impl ReadCopy for uuid::Uuid{
+    fn read<S: DataInput>(din: &mut S) -> Result<Self, std::string::String> {
         Ok(UUID::read(din)?.into())
     }
 }

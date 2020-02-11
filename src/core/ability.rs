@@ -15,7 +15,7 @@ pub struct Ability{
 }
 
 impl Ability{
-    pub fn new<EH: EventHandler>(loc: ResourceLocation,name: TextComponent,desc: TextComponent,bus: EH) -> Ability{
+    pub fn new<EH: EventHandler + 'static>(loc: ResourceLocation,name: TextComponent,desc: TextComponent,bus: EH) -> Ability{
         Ability{loc,name,desc,bus: Box::new(bus)}
     }
     pub fn get_name(&self) -> &TextComponent{
@@ -40,18 +40,5 @@ impl RegistryEntry for Ability{
     }
 }
 
-impl<'lua> FromLua<'lua> for Ability{
-    fn from_lua(lua_value: Value<'lua>, lua: Context<'lua>) -> Result<Self, Error> {
-        if let Value::Table(tab) = lua_value{
-            let loc = ResourceLocation::try_from(&(tab.get("loc") as std::string::String)?)?;
-            let name: TextComponent = tab.get("name")?;
-            let desc: TextComponent = tab.get("description")?;
-            let bus: LuaEventBus = tab.get("bus")?;
-            Ok(Ability{loc,name,desc,bus: Box::new(bus)})
-        }else{
-            Err(Error::RuntimeError("malformed descriptor".to_string()))
-        }
-    }
-}
 
 

@@ -141,14 +141,14 @@ impl Random{
         Generator{rand: self,f: &Random::next_bool}
     }
 
-    pub fn next_value<T,F: ?Sized>(&mut self,f: &F) ->T
+    pub fn next_value<T,F>(&mut self,f: F) ->T
         where F: FnOnce(&mut Random)->T{
         f(self)
     }
 
-    pub fn generator<'a,'b,T,F: ?Sized>(&'a mut self,f: &'b F) -> impl Iterator<Item=T>
+    pub fn generator<T, F: ?Sized>(&mut self, f: &F) -> impl Iterator<Item=T>
         where F: Fn(&mut Random)->T{
-        Generator::<'a,'b>{rand: self,f}
+        Generator{rand: self,f}
     }
 }
 

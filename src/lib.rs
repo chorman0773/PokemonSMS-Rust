@@ -1,4 +1,6 @@
 #![feature(try_trait)]
+#![feature(const_generics)]
+#![feature(never_type)]
 
 pub mod time;
 pub mod version;

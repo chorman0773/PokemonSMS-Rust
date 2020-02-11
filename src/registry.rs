@@ -4,9 +4,9 @@ extern crate lazy_static;
 extern crate regex;
 
 use std::convert::{TryFrom, TryInto};
-use std::ops::{Index, Deref};
+use std::ops::{Index, Deref, DerefMut};
 use std::cell::Cell;
-use std::sync::RwLock;
+use std::sync::{RwLock, LockResult, RwLockReadGuard, RwLockWriteGuard, PoisonError};
 
 #[derive(Clone,PartialEq,PartialOrd,Eq,Ord,Hash)]
 pub struct ResourceLocation{
@@ -71,30 +71,54 @@ pub trait RegistryEntry{
     fn name(&self) -> &ResourceLocation;
 }
 
-pub struct Registry<E: RegistryEntry>{
-    underlying: std::collections::BTreeMap<ResourceLocation,E>
+pub struct Registry<E: RegistryEntry + Sync>{
+    underlying: RwLock<std::collections::BTreeMap<ResourceLocation,E>>,
+    locked: RwLock<bool>
 }
 
 impl<E: RegistryEntry> Registry<E>{
     pub fn new() -> Registry<E>{
-        Self{underlying: std::collections::BTreeMap::new()}
+        Self{underlying: RwLock::new(std::collections::BTreeMap::new()),..Default::default()}
     }
-    pub fn register(&mut self,val: E) -> Result<&mut E,std::String::String>{
+    pub fn register(&self,val: E) -> Result<(),RegistryError>{
         let name = val.name().clone();
-        if self.underlying.contains_key(&name){
-            Err("Object with this name already exists".to_string())
+        let lock = underlying.write()?;
+        if self.locked.read()?{
+            Err(RegistryError::Locked)
+        }else if lock.contains_key(&name){
+            Err(RegistryError::AlreadyExists)
         }else{
-            self.underlying.insert(name.clone(),val);
-            Ok(self.underlying.get_mut(&name).unwrap())
+            lock.insert(name.clone(),val);
+            Ok(())
         }
     }
 
+    pub fn lock(&self) -> Result<(),RegistryError>{
+        let lock = underlying.read()?;
+    }
+
     pub fn iter(&self) -> impl Iterator<Item=&E>{
-        self.underlying.iter().map(|(_,o)|o)
+        let lock = self.underlying.read().unwrap();
+        ItemIter{map_lock: lock,iter: lock.iter()}
+    }
+
+    pub fn get_delayed<Q: TryInto<ResourceLocation>>(&self,key: &Q) -> RegistryObject<E>{
+        RegistryObject::new(self,key.try_into()?)
     }
 }
 
+struct ItemIter<'a,E: RegistryEntry>{
+    map_lock: RwLockReadGuard<'a,std::collections::BTreeMap<ResourceLocation,E>>,
+    iter: std::collections::btree_map::Iter<'a,ResourceLocation,E>
+}
 
+impl<'a,E: RegistryEntry> Iterator for ItemIter<'a,E>{
+    type Item = &'a E;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next().map(|(_,v)|v)
+    }
+}
 
 impl<E: RegistryEntry,Q: TryInto<ResourceLocation>> Index<&Q> for Registry<E>{
     type Output = E;
@@ -128,4 +152,17 @@ impl<'a,E: RegistryEntry> Deref for RegistryObject<'a,E>{
         }
     }
 }
+
+pub enum RegistryError{
+    Poisoned,
+    Locked,
+    AlreadyExists
+}
+
+impl<T> From<PoisonError<T>> for RegistryError{
+    fn from(_: PoisonError<T>) -> Self {
+       RegistryError::Poisoned
+    }
+}
+
 
