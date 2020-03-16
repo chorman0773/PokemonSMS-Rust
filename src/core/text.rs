@@ -261,7 +261,7 @@ impl<'lua> FromLua<'lua> for TextCommand{
 #[derive(Clone)]
 pub enum TextComponent{
     Text(std::string::String,Option<Style>,Option<Box<TextComponent>>),
-    Argument(Option<u64>,Option<Box<TextComponent>>),
+    Argument(Option<usize>,Option<Box<TextComponent>>),
     Command(TextCommand,Option<Box<TextComponent>>),
     Translation(std::string::String,Option<Box<TextComponent>>),
     Icon(ResourceLocation,Option<Box<TextComponent>>),
@@ -303,15 +303,22 @@ impl TextComponent{
         }
     }
 
+    ///
+    /// Replaces self with a value computed from f.
+    /// If f panics, then self is left as an empty text component.
+    /// The value initially contained in self is moved into the function call.
+    ///
     pub fn replace<F: FnOnce(Self)->Self>(&mut self, f: F){
         let val = std::mem::take(self);
         *self = f(val);
     }
+
 }
 
 pub use TextComponent::*;
 use rlua::prelude::LuaValue;
 use rlua::{FromLua, Context, Value, Error};
+use std::ops::Index;
 
 impl TryFrom<&JsonValue> for TextComponent{
     type Error = std::string::String;
@@ -346,7 +353,7 @@ impl TryFrom<&JsonValue> for TextComponent{
                     }else{
                         None
                     };
-                    Ok(Argument(n.as_fixed_point_u64(0),extra))
+                    Ok(Argument(Some(n.as_fixed_point_u64(0) as usize),extra))
                 }else if let Some(&JsonValue::String(s)) = o.get("translate"){
                     let extra = if let Some(o) = o.get("extra"){
                         Some(Box::new(TextComponent::try_from(o)?))
@@ -416,7 +423,7 @@ impl<'lua> TryFrom<&rlua::Value<'lua>> for TextComponent{
                     Ok(Argument(if n < 0{
                       None
                     }else{
-                        Some(n as u64)
+                        Some(n as usize)
                     },extra))
                 }else{
                     Err(Error::RuntimeError("Invalid or malformed Text Structure".to_string()))
@@ -434,8 +441,219 @@ impl<'lua> FromLua<'lua> for TextComponent{
     }
 }
 
-pub trait TextDisplay{
-    fn set_style(&mut self,s: &Style);
-    fn execute_command(&mut self,c: &TextCommand);
+#[derive(Default)]
+pub struct I18N{
+    tree: std::collections::HashMap<std::string::String,TextComponent>
+}
 
+impl I18N{
+    pub fn translate_copy(&self,text: TextComponent) -> TextComponent{
+        {
+            match text{
+                Text(s,style,Some(mut next)) => {
+                    self.translate(next.as_mut());
+                    Text(s,style,Some(next))
+                },
+                Translation(s,mut next) => {
+                    let mut ret = self.tree.get(&s).map(|v|v.clone())
+                        .unwrap_or_else(||Text(s,None,None));
+                    if let Some(mut n) = next{
+                        self.translate(n.as_mut());
+                        ret = ret.concatenate(*n)
+                    }
+                    ret
+                },
+                Argument(n,Some(mut next)) =>{
+                    self.translate(next.as_mut());
+                    Argument(n,Some(next))
+                },
+                Command(cmd,Some(mut next)) => {
+                    self.translate(next.as_mut());
+                    Command(cmd,Some(next))
+                },
+                Icon(res,Some(mut next)) => {
+                    self.translate(next.as_mut());
+                    Icon(res,Some(next))
+                },
+                Group(mut g) =>{
+                    for t in g.iter_mut(){
+                        self.translate(t)
+                    }
+                    Group(g)
+                },
+                v => v
+            }
+        }
+    }
+    pub fn translate(&self,component: &mut TextComponent){
+        component.replace(|text|self.translate_copy(text));
+    }
+}
+
+impl TryFrom<&JsonValue> for I18N{
+    type Error = std::string::String;
+
+    fn try_from(v: &JsonValue) -> Result<Self,Self::Error> {
+        let mut tree = Default::default();
+        if let JsonValue::Object(o) = v{
+            for (k,v) in o.iter(){
+                tree.insert(k.to_string(),TextComponent::try_from(v)?)
+            }
+            Ok(Self{tree})
+        }else{
+            Err("An object is required".to_string())
+        }
+    }
+}
+
+pub struct TextArguments<'a>{
+    arg_pos: usize,
+    components: &'a [TextComponent]
+}
+
+impl<'a> Iterator for TextArguments<'a>{
+    type Item = &'a TextComponent;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.arg_pos >= self.components.len() {
+            None
+        }else{
+            let ret = &self.components[self.arg_pos];
+            self.arg_pos += 1;
+            Some(ret)
+        }
+    }
+}
+
+impl<'a> Index<usize> for TextArguments<'a>{
+    type Output = TextComponent;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        components[index]
+    }
+}
+
+pub trait TextDisplay{
+    ///
+    /// Pushes the current style onto the TextDisplay's Style Stack.
+    /// This does not update the current style
+    fn push_style(&mut self) -> &mut Self;
+    ///
+    /// Sets the current style to the given one.
+    /// This overwrites the existing style, if its desired to return to the existing style,
+    ///  self.push_style() may be called before this method.
+    fn set_style(&mut self,style: Style) -> &mut Self;
+    fn pop_style(&mut self) -> &mut Self;
+    fn execute_command(&mut self,c: TextCommand) -> &mut Self;
+    fn write_string(&mut self,s: &std::string::String) -> &mut Self;
+    fn draw_icon(&mut self,r: &ResourceLocation) -> &mut Self;
+    fn get_translation(&self) -> Option<&I18N>;
+
+    fn draw_text(&mut self,text: &TextComponent,args: &mut TextArguments) -> &mut Self{
+        match text{
+            Empty => {},
+            Group(v) => {
+                self.push_style();
+                for t in v.iter(){
+                    self.draw_text(t,args)
+                }
+                self.pop_style();
+            },
+            Text(t,style,next) => {
+                self.push_style();
+                if let Some(s) = style{
+                    self.set_style(*s);
+                }
+                self.write_string(t);
+                if let Some(n) = next{
+                    self.draw_text(n.as_ref(),args)
+                }
+                self.pop_style();
+            },
+            Translation(key,next)=>{
+                self.push_style();
+                if let Some(i) = self.get_translation(){
+                    self.draw_text(i.tree.get(key).unwrap_or_else(||&Text(key.clone(),None,None)))
+                }else{
+                    self.draw_text(&Text(key.clone(),None,None))
+                }
+                if let Some(n) = next{
+                    self.draw_text(&n,args)
+                }
+                self.pop_style()
+            },
+            Command(TextCommand::Format(style),next) => {
+                self.set_style(*style);
+                if let Some(n) = next{
+                    self.draw_text(&n,args)
+                }
+            },
+            Command(cmd,next) => {
+                self.execute_command(*cmd);
+                if let Some(n) = next{
+                    self.draw_text(&n,args)
+                }
+            },
+            Argument(Some(n),next) => {
+                self.push_style();
+                self.draw_text(&args[*n],args);
+                if let Some(n) = next{
+                    self.draw_text(&n,args)
+                }
+                self.pop_style();
+            },
+            Argument(None,next) =>{
+                self.push_style();
+                self.draw_text(args.next().unwrap(),args);
+                if let Some(n) = next{
+                    self.draw_text(&n,args)
+                }
+                self.pop_style();
+            }
+            Icon(key, next) => {
+                self.draw_icon(key);
+                if let Some(n) = next {
+                    self.push_style();
+                    self.draw_text(&n,args);
+                    self.pop_style();
+                }
+            }
+        }
+        self
+    }
+}
+
+pub struct NullDisplay;
+
+impl TextDisplay for NullDisplay{
+    fn push_style(&mut self) -> &mut Self {
+        self
+    }
+
+    fn set_style(&mut self, style: Style) -> &mut Self {
+        self
+    }
+
+    fn pop_style(&mut self) -> &mut Self {
+        self
+    }
+
+    fn execute_command(&mut self, c: TextCommand) -> &mut Self {
+        self
+    }
+
+    fn write_string(&mut self, s: &String) -> &mut Self {
+        self
+    }
+
+    fn draw_icon(&mut self, r: &ResourceLocation) -> &mut Self {
+        self
+    }
+
+    fn get_translation(&self) -> Option<&I18N> {
+        None
+    }
+    fn draw_text(&mut self,text: &TextComponent,args: &mut TextArguments) -> &mut Self{
+        self
+    }
 }

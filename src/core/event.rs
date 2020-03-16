@@ -140,7 +140,7 @@ impl EventHandler for LuaEventBus{
                 let tab: rlua::Table = ctx.registry_value(rkey)?;
                 let key = EventKeyWrapper(event.get_key());
                 let LuaHandler(pred,handler) = tab.get(key)?;
-                let result:bool = pred.call(event.get_params())?;
+                let result = pred.call::<_,bool>(event.get_params())?;
                 if result{
                     handler.call(get_params())?;
                 }

@@ -64,12 +64,11 @@ impl Type{
         *self.handler
     }
 
-
 }
 
 lazy_static!{
         static ref TYPE_REGISTRY: Registry<Type> = {
            let reg: Registry<Type> = Registry::new();
-           let typeless = Type::new();
+           let typeless = Type::new(text::);
         }
 }

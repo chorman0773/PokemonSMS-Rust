@@ -71,19 +71,23 @@ pub trait RegistryEntry{
     fn name(&self) -> &ResourceLocation;
 }
 
-pub struct Registry<E: RegistryEntry + Sync>{
+pub struct Registry<E>{
     underlying: RwLock<std::collections::BTreeMap<ResourceLocation,E>>,
     locked: RwLock<bool>
 }
 
-impl<E: RegistryEntry + Sync> Registry<E>{
+unsafe impl<E: RegistryEntry + Sync> Sync for Registry<E>{}
+
+impl<E> !Send for Registry<E>{}
+
+impl<E: RegistryEntry> Registry<E>{
     pub fn new() -> Registry<E>{
         Self{underlying: RwLock::new(std::collections::BTreeMap::new()),..Default::default()}
     }
     pub fn register(&self,val: E) -> Result<(),RegistryError>{
         let name = val.name().clone();
         let lock = underlying.write()?;
-        if self.locked.read()?{
+        if *self.locked.read()?{
             Err(RegistryError::Locked)
         }else if lock.contains_key(&name){
             Err(RegistryError::AlreadyExists)
@@ -95,11 +99,17 @@ impl<E: RegistryEntry + Sync> Registry<E>{
 
     pub fn lock(&self) -> Result<(),RegistryError>{
         let lock = underlying.read()?;
+        if *self.locked.read()?{
+            Err(RegistryError::Locked)
+        }else{
+            *self.locked.write()? = true;
+            Ok(())
+        }
     }
 
-    pub fn iter(&self) -> impl Iterator<Item=&E>{
-        let lock = self.underlying.read().unwrap();
-        ItemIter{map_lock: lock,iter: lock.iter()}
+    pub fn iter(&self) -> Result<impl Iterator<Item=&E>,RegistryError>{
+        let lock = self.underlying.read()?;
+        Ok(ItemIter{map_lock: lock,iter: lock.iter()})
     }
 
     pub fn get_delayed<Q: TryInto<ResourceLocation>>(&self,key: &Q) -> RegistryObject<E>{

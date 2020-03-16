@@ -2,6 +2,7 @@ use std::sync::atomic::Ordering;
 use std::sync::atomic::AtomicU64;
 use std::num::Wrapping;
 use core::panicking::panic;
+use std::io::{Read, Error};
 
 pub struct Random{
     seed: u64,
@@ -171,3 +172,9 @@ impl<'a,'b,T,F> Iterator for Generator<'a,'b,T,F>
     }
 }
 
+impl Read for Random{
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize, Error> {
+        self.next_bytes(buf);
+        Ok(buf.len())
+    }
+}

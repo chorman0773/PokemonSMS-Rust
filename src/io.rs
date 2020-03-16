@@ -66,6 +66,7 @@ impl<T: ReadCopy> Readable for T{
 }
 
 unsafe trait Primitive{
+    // heck off clippy
     fn to_order(self,order: Endianess)->Self;
     fn from_order(self,order: Endianess)->Self;
 }
@@ -397,6 +398,32 @@ pub trait DataOutput{
     fn write_bytes(&mut self,bytes: &[u8]) -> Result<()>;
     fn write_single(&mut self,byte: u8) -> Result<()>;
     fn byte_order(&self) -> Endianess;
+}
+
+pub struct DataOutputStream<'a,W: Write>{
+    w: &'a mut W,
+    endianess: Endianess
+}
+
+impl<'a,W: Write> DataOutputStream<'a,W>{
+    pub fn new(w: &'a mut W,endianess: Endianess) -> Self{
+        Self{w,endianess}
+    }
+}
+
+impl<'a,W: Write> DataOutput for DataOutputStream<'a,W>{
+    fn write_bytes(&mut self, bytes: &[u8]) -> Result<()> {
+        self.w.write(bytes)?;
+        Ok(())
+    }
+
+    fn write_single(&mut self, byte: u8) -> Result<()> {
+        self.write_bytes(std::slice::from_ref(&byte))
+    }
+
+    fn byte_order(&self) -> Endianess {
+        self.endianess
+    }
 }
 
 pub trait Writeable{
