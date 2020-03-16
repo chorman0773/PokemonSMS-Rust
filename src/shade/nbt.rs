@@ -1,5 +1,5 @@
-use std::borrow::Borrow;
-use crate::uuid::{uuid, UUID};
+
+use crate::uuid::UUID;
 use crate::io::{Readable, ReadCopy, DataInput, Writeable, DataOutput};
 
 #[derive(Clone)]
@@ -75,7 +75,7 @@ impl Default for NBTTag{
     }
 }
 
-fn read_length_array<T: BinaryIOReadable + Copy,S: DataInput>(arr:&mut Box<[T]>,din: &mut S) -> Result<&Box<[T]>,&'static str>{
+fn read_length_array<'a,T: ReadCopy,S: DataInput>(arr:&'a mut Box<[T]>,din: &mut S) -> Result<&'a Box<[T]>,&'static str>{
     let len = i32::read(din)?;
     if len < 0{
         Err("length must not be negative")
@@ -93,28 +93,74 @@ impl Readable for NBTTag{
     fn read_from<Input: DataInput>(&mut self, din: &mut Input) -> Result<&Self, &'static str> {
         match self {
             NBTTag::End => Ok(self),
-            NBTTag::Byte(val)
-            | NBTTag::Short(val)
-            | NBTTag::Int(val)
-            | NBTTag::Long(val)
-            | NBTTag::Float(val)
-            | NBTTag::Double(val)
-            | NBTTag::String(val)
-            | NBTTag::List(val)
-            | NBTTag::Compound(val)
-            | NBTTag::UUID(val) => {
+            NBTTag::Byte(val) => {
                 val.read_to(din)?;
                 Ok(self)
             },
-            NBTTag::ByteArray(arr)
-            | NBTTag::IntArray(arr)
-            | NBTTag::LongArray(arr)
-            | NBTTag::FloatArray(arr)
-            | NBTTag::DoubleArray(arr) => {
+            NBTTag::Short(val) => {
+                val.read_to(din)?;
+                Ok(self)
+            },
+            NBTTag::Int(val) => {
+                val.read_to(din)?;
+                Ok(self)
+            },
+            NBTTag::Long(val) => {
+                val.read_to(din)?;
+                Ok(self)
+            },
+            NBTTag::Float(val) => {
+                val.read_to(din)?;
+                Ok(self)
+            },
+            NBTTag::Double(val) => {
+                val.read_to(din)?;
+                Ok(self)
+            },
+            NBTTag::String(val) => {
+                val.read_to(din)?;
+                Ok(self)
+            },
+            NBTTag::List(val) => {
+                val.read_to(din)?;
+                Ok(self)
+            },
+            NBTTag::Compound(val) => {
+                val.read_to(din)?;
+                Ok(self)
+            },
+            NBTTag::UUID(val) => {
+                val.read_to(din)?;
+                Ok(self)
+            },
+            NBTTag::ByteArray(arr) => {
+                read_length_array(arr,din)?;
+                Ok(self)
+            }
+            NBTTag::IntArray(arr) => {
+                read_length_array(arr,din)?;
+                Ok(self)
+            }
+            NBTTag::LongArray(arr) => {
+                read_length_array(arr,din)?;
+                Ok(self)
+            }
+            NBTTag::FloatArray(arr) => {
+                read_length_array(arr,din)?;
+                Ok(self)
+            }
+            NBTTag::DoubleArray(arr) => {
                 read_length_array(arr,din)?;
                 Ok(self)
             }
         }
+    }
+}
+
+impl ReadCopy for NBTTag{
+    fn read<S: DataInput + ?Sized>(din: &mut S) -> Result<Self,std::string::String> {
+        let compound = din.read_value()?;
+        return Ok(NBTTag::Compound(compound))
     }
 }
 
@@ -180,10 +226,10 @@ pub struct List{
 impl List{
     fn add(&mut self,tag: &NBTTag) -> Option<&NBTTag>{
         if self.list.is_empty() {
-            tag_type = tag.get_tag_type();
+            self.tag_type = tag.get_tag_type();
             self.list.push(tag.clone());
             self.list.last()
-        }else if tag_type == tag.get_tag_type(){
+        }else if self.tag_type == tag.get_tag_type(){
             self.list.push(tag.clone());
             self.list.last()
         }else {
@@ -203,27 +249,27 @@ impl Default for List{
 }
 
 
-impl ReadTo for List{
-    fn read_to<S: DataInput>(&mut self, din: &mut S) -> Result<&Self, std::string::String> {
+impl Readable for List{
+    fn read_from<S: DataInput>(&mut self, din: &mut S) -> Result<&Self, std::string::String> {
         self.list.clear();
         let tag_type = u8::read(din)?;
         let len = i32::read(din)?;
         if len < 0 {
-            Err("length must not be negative".to_string())
+            return Err("length must not be negative".to_string())
         }
         self.list.reserve(len as usize);
         self.tag_type = tag_type;
         for i in 0..len{
             let mut tag = NBTTag::new_from_tag_type(tag_type).ok_or_else(||"Invalid Tag Type".to_string())?;
-            tag.read_to(din)?;
+            tag.read_from(din)?;
             self.list.push(tag);
         }
         Ok(self)
     }
 }
 
-impl BinaryIOWritable for List{
-    fn write<S: DataOutput>(&self, out: &mut S) {
+impl Writeable for List{
+    fn write<S: DataOutput + ?Sized>(&self, out: &mut S) {
         self.tag_type.write(out);
         self.len.write(out);
         for tag in &self.list{

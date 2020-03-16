@@ -1,7 +1,5 @@
 pub use crate::core::Side::{Client, Server};
 
-#[macro_use]
-extern crate lazy_static;
 
 pub mod event;
 pub mod text;

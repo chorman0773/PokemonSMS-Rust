@@ -46,9 +46,9 @@ impl AddAssign for Duration {
     fn add_assign(&mut self, rhs: Self) {
         self.seconds += rhs.seconds;
         self.nanos += rhs.nanos;
-        if nanos>=1000000000 {
-            seconds += 1;
-            nanos -= 1000000000;
+        if self.nanos>=1000000000 {
+            self.seconds += 1;
+            self.nanos -= 1000000000;
         }
     }
 }

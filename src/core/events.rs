@@ -23,7 +23,7 @@ pub mod Battle{
         impl EventKey for LocalLifetime{}
 
         #[derive(Copy,Clone,PartialEq,Eq,Hash)]
-        enum Root{
+        pub enum Root{
             Transfer,
             Replace
         }

@@ -1,7 +1,6 @@
 use std::sync::atomic::Ordering;
 use std::sync::atomic::AtomicU64;
 use std::num::Wrapping;
-use core::panicking::panic;
 
 pub struct Random{
     seed: u64,
@@ -14,7 +13,7 @@ impl Random{
         const cnum: u64 = 167477818489483;
         let mut val = num.get();
         let timeval = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap();
-        while let Err(nval) = num.compare_exchange(val,cnum*val+1,Ordering::SeqCst,Ordering.SeqCst){
+        while let Err(nval) = num.compare_exchange(val,cnum*val+1,Ordering::SeqCst,Ordering::SeqCst){
             val = nval;
         }
         return (Wrapping(val)*31+Wrapping(timeval.as_micros())) as Wrapping<u64>.0;
@@ -30,8 +29,8 @@ impl Random{
     }
     unsafe fn next<T: From<u32>>(&mut self,bits: u32) -> T{
         //Expects: 0 <= bits <= 32
-        self.seed = (seed * 0x5DEECE66Du8 + 0xBu8) & ((1u8 << 48) - 1);
-        ((self.seed >> (48u64 - bits)) as u32).into()
+        self.seed = (self.seed * 0x5DEECE66Du64 + 0xBu64) & ((1u64 << 48) - 1);
+        ((self.seed >> (48u64 - (bits as u64))) as u32).into()
     }
     pub fn next_int(&mut self) -> i32{
         unsafe { self.next(32) }
@@ -80,8 +79,8 @@ impl Random{
             let mut v2: f64;
             let mut s: f64;
             loop{
-                v1 = 2 * nextDouble() - 1;   // between -1.0 and 1.0
-                v2 = 2 * nextDouble() - 1;   // between -1.0 and 1.0
+                v1 = 2 * self.nextDouble() - 1;   // between -1.0 and 1.0
+                v2 = 2 * self.nextDouble() - 1;   // between -1.0 and 1.0
                 s = v1 * v1 + v2 * v2;
                 if s > 0f64 && s< 1f64{
                     break;
@@ -104,7 +103,7 @@ impl Random{
         }
         match bytes.len()%4{
             0 => {},
-            i @ 1..3 => {
+            i @ 1..=3 => {
                 let val = unsafe{self.next::<u32>(32)};
                 (0..i).for_each(|i| bytes[4 * max + i] = (val >> (8 * i) as u32) as u8);
             },

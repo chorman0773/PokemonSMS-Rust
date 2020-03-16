@@ -44,18 +44,18 @@ impl<'a> UserData for EventKeyWrapper<'a>{
     fn add_methods<'lua,M: UserDataMethods<'lua, Self>>(methods: &mut M){
         methods.add_meta_function(MetaMethod::Eq,|ctx,args: (EventKeyWrapper<'a>,EventKeyWrapper<'a>)|{
             let (a,b) = args;
-            if a.0.type_id() != b.0.type_id(){
+            Ok(if a.0.type_id() != b.0.type_id(){
                 return false
             }else{
                 return a.0 == b.0
-            }
+            })
         })
     }
 }
 
 pub trait Event {
     type Key: EventKey;
-    type Params : rlua::ToLuaMulti;
+    type Params : for<'lua> rlua::ToLuaMulti<'lua>;
     fn get_key(&self) -> &'static Self::Key;
     fn get_params(&self) -> &Self::Params;
 
