@@ -33,13 +33,17 @@ lazy_static!{
 }
 
 impl ResourceLocation{
-    pub const fn new(domain: std::string::String,path: std::string::String) -> Result<ResourceLocation,std::string::String>{
+    pub fn new(domain: std::string::String,path: std::string::String) -> Result<ResourceLocation,std::string::String>{
         if !DOMAIN_PATTERN.is_match(&domain) || !PATH_PATTERN.is_match(&path){
             Err(r"Resource Locations must match: [a-z_][a-z0-9_]*:[a-z_][a-z0-9_]*(\\[a-z_][a-z0-9_]*)*".to_string())
         }else{
             Ok(ResourceLocation{domain,path})
         }
     }
+
+	pub fn create<S: AsRef<str>>(value: &S) -> Self{
+		value.try_into().unwrap()
+	}
 }
 
 impl<S: AsRef<str>> TryFrom<&S> for ResourceLocation{
@@ -86,7 +90,7 @@ impl<E: RegistryEntry> Registry<E>{
     }
     pub fn register(&self,val: E) -> Result<(),RegistryError>{
         let name = val.name().clone();
-        let lock = underlying.write()?;
+        let lock = self.underlying.write()?;
         if *self.locked.read()?{
             Err(RegistryError::Locked)
         }else if lock.contains_key(&name){
@@ -98,13 +102,13 @@ impl<E: RegistryEntry> Registry<E>{
     }
 
     pub fn lock(&self) -> Result<(),RegistryError>{
-        let lock = underlying.read()?;
-        if *self.locked.read()?{
-            Err(RegistryError::Locked)
-        }else{
-            *self.locked.write()? = true;
-            Ok(())
-        }
+        let lock = self.underlying.read()?;
+		if *self.locked.read()?{
+			Err(RegistryError::Locked)
+		}else{
+			*self.locked.write()? = true;
+			Ok(())
+		}
     }
 
     pub fn iter(&self) -> Result<impl Iterator<Item=&E>,RegistryError>{

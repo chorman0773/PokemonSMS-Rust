@@ -2,8 +2,6 @@ use crate::core::text::TextComponent;
 use crate::registry::{ResourceLocation, RegistryEntry};
 use crate::core::event::EventHandler;
 
-#[macro_use]
-extern crate lazy_static;
 
 pub enum TypeModifier{
     WEAKNESS,

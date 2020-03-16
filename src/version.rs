@@ -1,17 +1,16 @@
 use std::fmt::{Formatter, Error, Display, Debug};
 use std::ops::RangeBounds;
 
-#[derive(Default,Eq,PartialEq,Copy,Clone,Ord,PartialOrd,Hash,Display)]
+#[derive(Default,Eq,PartialEq,Copy,Clone,Ord,PartialOrd,Hash)]
 pub struct Version(pub u8,pub u8);
 
 
 impl Display for Version{
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
-        (major as u16 + 1).fmt(f).and_then(||{
-            f.write_str(".");
-            self.minor.fmt(f)
-        })
-    }
+        f.write_fmt(format_args!("{}",self.0 as u16 + 1))?;
+		f.write_fmt(format_args!("{}",self.1));
+		Ok(())
+	}
 }
 
 

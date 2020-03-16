@@ -18,27 +18,27 @@ impl UUID{
 impl From<(u64,u64)> for UUID{
     fn from(val: (u64, u64)) -> Self {
         let (x,y) = val;
-        return UUID(x,y)
+        UUID(x,y)
     }
 }
 
 impl From<u128> for UUID{
     fn from(val: u128) -> Self{
         let (x,y) = (((val>>64)&0xFFFFFFFFFFFFFFFF) as u64,(val&0xFFFFFFFFFFFFFFFF) as u64);
-        return UUID(x,y)
+        UUID(x,y)
     }
 }
 
 impl From<UUID> for u128{
-    fn from(val: UUID) -> Self{
+    fn from(val: UUID) -> u128{
         let UUID(x,y) = val;
-        return (x as u128)<<64 | y as u128;
+        (x as u128)<<64 | y as u128
     }
 }
 
 impl Default for UUID{
     fn default() -> Self {
-        Self::nil
+        Self::NIL
     }
 }
 
@@ -52,7 +52,7 @@ impl ReadCopy for UUID{
     }
 }
 
-impl Writable for UUID{
+impl Writeable for UUID{
     fn write<S: DataOutput>(&self, out: &mut S) {
         self.0.write(out);
         self.1.write(out);
@@ -61,19 +61,19 @@ impl Writable for UUID{
 
 impl From<uuid::Uuid> for UUID{
     fn from(val: Uuid) -> Self {
-        return std::u128::from_be(val.as_u128()).into()
+        u128::from_be(val.as_u128()).into()
     }
 }
 
 impl From<UUID> for uuid::Uuid{
-    fn from(val: Uuid) -> Self{
-        return Uuid::from_u128(std::u128::to_be(val.into()))
+    fn from(val: UUID) -> Self{
+        Uuid::from_u128(u128::to_be(val.into()))
     }
 }
 
 impl Writeable for uuid::Uuid{
     fn write<S: DataOutput>(&self, out: &mut S) {
-        UUID::from(self).write(out);
+        UUID::from(*self).write(out);
     }
 }
 

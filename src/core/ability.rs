@@ -4,8 +4,6 @@ use crate::core::event::{EventHandler, LuaEventBus,NullEventBus};
 use rlua::{FromLua, Context, Value, Error, Table};
 use std::convert::{TryFrom, TryInto};
 
-#[macro_use]
-extern crate lazy_static;
 
 pub struct Ability{
     loc: ResourceLocation,
@@ -27,17 +25,20 @@ impl Ability{
     pub fn get_event_bus(&self) -> &dyn EventHandler{
         self.bus.as_ref()
     }
-    lazy_static!{
-        pub static ref null: Ability = {
-            Ability::new("system:abilities/null",Text("null".to_string(),None),Empty,NullEventBus).unwrap()
-        };
-        pub static ref REGISTRY: Registry<Ability> = {
-            let reg = Registry::new();
-            reg.register(*null);
-            reg
-        };
-    }
+
 }
+
+lazy_static!{
+    pub static ref null: Ability = {
+        Ability::new("system:abilities/null",Text("null".to_string(),None),Empty,NullEventBus).unwrap()
+    };
+    pub static ref REGISTRY: Registry<Ability> = {
+        let reg = Registry::new();
+        reg.register(*null);
+        reg
+    };
+}
+
 
 impl RegistryEntry for Ability{
     fn name(&self) -> &ResourceLocation {

@@ -1,6 +1,4 @@
 
-#[macro_use]
-extern crate lazy_static;
 
 use crate::registry::ResourceLocation;
 use std::convert::{TryFrom, TryInto};

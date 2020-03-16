@@ -2,12 +2,17 @@
 #![feature(const_generics)]
 #![feature(never_type)]
 #![feature(box_syntax)]
+#![feature(core_intrinsics)]
+#![feature(impl_trait_in_bindings)]
+
+#[macro_use]
+extern crate lazy_static;
+
 
 pub(crate) mod helper;
 
 pub mod time;
 pub mod version;
-pub mod crypto;
 pub mod shade;
 pub mod uuid;
 pub mod io;

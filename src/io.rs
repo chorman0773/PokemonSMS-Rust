@@ -1,6 +1,4 @@
 
-#[macro_use]
-extern crate lazy_static;
 
 extern crate openssl;
 
@@ -16,10 +14,9 @@ pub enum Endianess{
 }
 
 pub use Endianess::*;
-use std::io::{Read, Error, Seek, SeekFrom, Write};
+use std::io::{Read, Error, Seek, SeekFrom, Write, Take, Bytes, Chain, IoSliceMut};
 use std::borrow::BorrowMut;
 use std::ops::Shr;
-use core::panicking::panic;
 use self::openssl::sign::Verifier;
 use self::openssl::error::ErrorStack;
 
@@ -50,16 +47,16 @@ pub trait DataInput{
     }
 }
 
-pub trait ReadCopy{
-    fn read<S: DataInput>(din: &mut S) -> Result<Self>;
+pub trait ReadCopy : Sized{
+    fn read<S: DataInput + ?Sized>(din: &mut S) -> Result<Self>;
 }
 
 pub trait Readable{
-    fn read_from<S: DataInput>(&mut self,din: &mut S) -> Result<()>;
+    fn read_from<S: DataInput + ?Sized>(&mut self,din: &mut S) -> Result<()>;
 }
 
-impl<T: ReadCopy> Readable for T{
-    fn read_from<S: DataInput>(&mut self, din: &mut S) -> Result<()> {
+default impl<T: ReadCopy> Readable for T{
+    fn read_from<S: DataInput + ?Sized>(&mut self, din: &mut S) -> Result<()> {
         *self = <T as ReadCopy>::read(din)?;
         Ok(())
     }
@@ -72,7 +69,7 @@ unsafe trait Primitive{
 }
 
 impl<T: Primitive> ReadCopy for T{
-    fn read<S: DataInput>(din: &mut S) -> Result<Self>{
+    fn read<S: DataInput + ?Sized>(din: &mut S) -> Result<Self>{
         let mut buf = [0u8; std::mem::size_of::<T>()];
         din.read_fully(&buf)?;
         unsafe{
@@ -83,19 +80,19 @@ impl<T: Primitive> ReadCopy for T{
 }
 
 impl ReadCopy for u8{
-    fn read<S: DataInput>(din: &mut S) -> Result<Self> {
+    fn read<S: DataInput + ?Sized>(din: &mut S) -> Result<Self> {
         din.read_single()
     }
 }
 
 impl ReadCopy for i8{
-    fn read<S: DataInput>(din: &mut S) -> Result<Self> {
+    fn read<S: DataInput + ?Sized>(din: &mut S) -> Result<Self> {
         din.read_single().map(|v|v as i8)
     }
 }
 
 impl ReadCopy for bool{
-    fn read<S: DataInput>(din: &mut S) -> Result<Self> {
+    fn read<S: DataInput + ?Sized>(din: &mut S) -> Result<Self> {
         match u8::read(din)?{
             0 => Ok(false),
             1 => Ok(true),
@@ -136,41 +133,41 @@ impl_primitive!(u128);
 impl_primitive!(i128);
 
 impl ReadCopy for f32{
-    fn read<S: DataInput>(din: &mut S) -> Result<Self> {
+    fn read<S: DataInput + ?Sized>(din: &mut S) -> Result<Self> {
         Ok(f32::from_bits(u32::read(din)?))
     }
 }
 
 impl ReadCopy for f64{
-    fn read<S: DataInput>(din: &mut S) -> Result<Self> {
+    fn read<S: DataInput + ?Sized>(din: &mut S) -> Result<Self> {
         Ok(f64::from_bits(u64::read(din)?))
     }
 }
 
 impl<T: ReadCopy> ReadCopy for MaybeUninit<T>{
-    fn read<S: DataInput>(din: &mut S) -> Result<Self> {
+    fn read<S: DataInput + ?Sized>(din: &mut S) -> Result<Self> {
         T::read(din).map(|t|MaybeUninit::new(t))
     }
 }
 
 impl<T: ReadCopy,const N: usize> ReadCopy for [T;N]{
-    fn read<S: DataInput>(din: &mut S) -> Result<Self> {
+    fn read<S: DataInput + ?Sized>(din: &mut S) -> Result<Self> {
         let mut ret: MaybeUninit<[T;N]> = MaybeUninit::uninit();
         for i in 0..N{
-            unsafe{ (std::intrinsics::offset(ret.as_mut_ptr() as *mut T, i as isize) as *mut T).write(T::read(din)?)};
+            unsafe{ ((ret.as_mut_ptr() as *mut T).offset( i as isize) as *mut T).write(T::read(din)?)};
         }
         Ok(unsafe{ret.assume_init()})
     }
 }
 
 impl<T: ReadCopy> ReadCopy for Box<T>{
-    fn read<S: DataInput>(din: &mut S) -> Result<Self> {
+    fn read<S: DataInput + ?Sized>(din: &mut S) -> Result<Self> {
         Ok(Box::new(T::read(din)?))
     }
 }
 
 impl ReadCopy for std::string::String{
-    fn read<S: DataInput>(din: &mut S) -> Result<Self> {
+    fn read<S: DataInput + ?Sized>(din: &mut S) -> Result<Self> {
         let sz = u16::read(din)?;
         let mut vec = Vec::<u8>::with_capacity(sz as usize);
         vec.resize(sz as usize,0u8);
@@ -180,23 +177,15 @@ impl ReadCopy for std::string::String{
     }
 }
 
-impl<const N: usize> Readable for [u8;N]{
-    fn read_from<S: DataInput>(&mut self, din: &mut S) -> Result<()> {
+impl Readable for [u8]{
+    fn read_from<S: DataInput + ?Sized>(&mut self, din: &mut S) -> Result<()> {
         din.read_fully(self)
     }
 }
 
-impl<T: Readable,N: usize> Readable for [T;N]{
-    fn read_from<S: DataInput>(&mut self, din: &mut S) -> Result<()> {
-        for a in self.iter_mut(){
-            a.read_into(din)?;
-        }
-        Ok(())
-    }
-}
 
 impl<T: Readable> Readable for [T]{
-    fn read_from<S: DataInput>(&mut self, din: &mut S) -> Result<()> {
+    fn read_from<S: DataInput + ?Sized>(&mut self, din: &mut S) -> Result<()> {
         for a in self.iter_mut(){
             a.read_into(din)?;
         }
@@ -205,56 +194,56 @@ impl<T: Readable> Readable for [T]{
 }
 
 impl<T: Readable + ?Sized> Readable for Box<T>{
-    fn read_from<S: DataInput>(&mut self, din: &mut S) -> Result<()> {
+    fn read_from<S: DataInput + ?Sized>(&mut self, din: &mut S) -> Result<()> {
         self.borrow_mut().read_into(din)
     }
 }
 
 impl<A: ReadCopy> ReadCopy for (){
-    fn read<S: DataInput>(_: &mut S) -> Result<Self>{
+    fn read<S: DataInput + ?Sized>(_: &mut S) -> Result<Self>{
         Ok(())
     }
 }
 
 impl<A: ReadCopy> ReadCopy for (A,){
-    fn read<S: DataInput>(din: &mut S) -> Result<Self> {
+    fn read<S: DataInput + ?Sized>(din: &mut S) -> Result<Self> {
         Ok((A::read(din)?,))
     }
 }
 
 impl<A: ReadCopy,B: ReadCopy> ReadCopy for (A,B){
-    fn read<S: DataInput>(din: &mut S) -> Result<Self> {
+    fn read<S: DataInput + ?Sized>(din: &mut S) -> Result<Self> {
         Ok((A::read(din)?,B::read(din)?))
     }
 }
 
 impl<A: ReadCopy,B: ReadCopy,C: ReadCopy> ReadCopy for (A,B,C){
-    fn read<S: DataInput>(din: &mut S) -> Result<Self> {
+    fn read<S: DataInput + ?Sized>(din: &mut S) -> Result<Self> {
         Ok((A::read(din)?,B::read(din)?,C::read(din)?))
     }
 }
 
 impl<A: ReadCopy,B: ReadCopy,C: ReadCopy,D: ReadCopy> ReadCopy for (A,B,C,D){
-    fn read<S: DataInput>(din: &mut S) -> Result<Self> {
+    fn read<S: DataInput + ?Sized>(din: &mut S) -> Result<Self> {
         Ok((A::read(din)?,B::read(din)?,C::read(din)?,D::read(din)?))
     }
 }
 
 impl Readable for (){
-    fn read_from<S: DataInput>(&mut self, din: &mut S) -> Result<()> {
+    fn read_from<S: DataInput + ?Sized>(&mut self, din: &mut S) -> Result<()> {
         Ok(())
     }
 }
 
 impl<A: Readable + ?Sized> Readable for (A,){
-    fn read_from<S: DataInput>(&mut self, din: &mut S) -> Result<()> {
-        let (a) = self;
+    fn read_from<S: DataInput + ?Sized>(&mut self, din: &mut S) -> Result<()> {
+        let (a,) = self;
         a.read_into(din)
     }
 }
 
 impl<A: Readable + ?Sized,B: Readable> Readable for (B,A){
-    fn read_from<S: DataInput>(&mut self, din: &mut S) -> Result<()> {
+    fn read_from<S: DataInput + ?Sized>(&mut self, din: &mut S) -> Result<()> {
         let (b,a) = self;
         b.read_into(din)?;
         a.read_into(din)
@@ -262,7 +251,7 @@ impl<A: Readable + ?Sized,B: Readable> Readable for (B,A){
 }
 
 impl<A: Readable + ?Sized,B: Readable,C: Readable> Readable for (B,C,A){
-    fn read_from<S: DataInput>(&mut self, din: &mut S) -> Result<()> {
+    fn read_from<S: DataInput + ?Sized>(&mut self, din: &mut S) -> Result<()> {
         let (b,c,a) = self;
         b.read_into(din)?;
         c.read_into(din)?;
@@ -271,7 +260,7 @@ impl<A: Readable + ?Sized,B: Readable,C: Readable> Readable for (B,C,A){
 }
 
 impl<A: Readable + ?Sized,B: Readable,C: Readable,D: Readable> Readable for (B,C,D,A){
-    fn read_from<S: DataInput>(&mut self, din: &mut S) -> Result<()> {
+    fn read_from<S: DataInput + ?Sized>(&mut self, din: &mut S) -> Result<()> {
         let (b,c,d,a) = self;
         b.read_into(din)?;
         c.read_into(din)?;
@@ -280,13 +269,13 @@ impl<A: Readable + ?Sized,B: Readable,C: Readable,D: Readable> Readable for (B,C
     }
 }
 
-struct DataInputStream<'a,I: Read + ?Sized + 'a>{
+pub struct DataInputStream<'a,I: Read + ?Sized + 'a>{
     read: &'a I,
-    order: ByteOrder
+    order: Endianess
 }
 
 impl<'a,I: Read + ?Sized + 'a> DataInputStream<'a,I>{
-    pub fn new(read: &'a I,order: ByteOrder) -> Self{
+    pub fn new(read: &'a I,order: Endianess) -> Self{
         Self{read,order}
     }
 }
@@ -312,6 +301,14 @@ impl<'a,I: Read + ?Sized + 'a> DataInput for DataInputStream<'a,I>{
 
     fn set_byte_order(&mut self, byte_order: Endianess) {
         self.order = byte_order;
+    }
+}
+
+pub use std::io::Result as IOResult;
+
+impl<'a,I: Read +?Sized +'a> Read for DataInputStream<'a,I>{
+    fn read(&mut self, buf: &mut [u8]) -> IOResult<usize> {
+        self.read.read(buf)
     }
 }
 
@@ -477,7 +474,7 @@ impl Writeable for [u8]{
     }
 }
 
-impl<S: AsRef<str> + ?Sized> Writeable for S{
+impl<St: AsRef<str> + ?Sized> Writeable for St{
     fn write<S: DataOutput>(&self, out: &mut S) -> Result<()> {
         let s = self.as_ref();
         let len = usize::max(s.len(),u16::max_value() as usize) as u16;
@@ -486,3 +483,42 @@ impl<S: AsRef<str> + ?Sized> Writeable for S{
     }
 }
 
+
+pub struct DataOutputStream<'a,I: Write + ?Sized + 'a>{
+    write: &'a mut I,
+    order: Endianess
+}
+
+impl<'a,I: Write +?Sized +'a> DataOutputStream<'a,I>{
+    pub fn new(write: &'a mut I,order: Endianness) -> Self{
+        Self{write,order}
+    }
+    pub fn set_byte_order(&mut self,order: Endianness){
+        self.order = order
+    }
+}
+
+impl<'a,I: Write +?Sized +'a> DataOutput for DataOutputStream<'a,I>{
+    fn write_bytes(&mut self, bytes: &[u8]) -> Result<()> {
+        self.write.write(bytes).map_err(|e|e.to_string())
+            .and_then(|s|if s==bytes.len(){return Ok(())}else{Err("Length Error".to_string())})
+    }
+
+    fn write_single(&mut self, byte: u8) -> Result<()> {
+        self.write_bytes(std::slice::from_ref(&byte))
+    }
+
+    fn byte_order(&self) -> Endianess {
+        self.order
+    }
+}
+
+impl<'a,I: Write + ?Sized + 'a> Write for DataOutputStream<'a,I>{
+    fn write(&mut self, buf: &[u8]) -> Result<usize> {
+        self.write(buf)
+    }
+
+    fn flush(&mut self) -> Result<()> {
+        self.flush()
+    }
+}
