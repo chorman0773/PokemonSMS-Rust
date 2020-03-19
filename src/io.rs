@@ -64,6 +64,7 @@ default impl<T: ReadCopy> Readable for T{
 
 unsafe trait Primitive{
     // heck off clippy
+    // This is an implementation detail
     fn to_order(self,order: Endianess)->Self;
     fn from_order(self,order: Endianess)->Self;
 }
@@ -102,8 +103,8 @@ impl ReadCopy for bool{
 }
 
 macro_rules! impl_primitive{
-    ($type:ident) =>{
-        unsafe impl Primitive for $type{
+    ($($type:ident),*) =>{
+        $(unsafe impl Primitive for $type{
             fn to_order(self,order: Endianess) -> Self{
                 match order{
                     BigEndian => Self::to_be(self),
@@ -119,18 +120,12 @@ macro_rules! impl_primitive{
                     Native => self
                 }
             }
-        }
+        })*
     }
 }
 
-impl_primitive!(u16);
-impl_primitive!(i16);
-impl_primitive!(u32);
-impl_primitive!(i32);
-impl_primitive!(u64);
-impl_primitive!(i64);
-impl_primitive!(u128);
-impl_primitive!(i128);
+impl_primitive!(u16,u32,u64,u128);
+impl_primitive!(i16,i32,i64,i128);
 
 impl ReadCopy for f32{
     fn read<S: DataInput + ?Sized>(din: &mut S) -> Result<Self> {
@@ -150,15 +145,25 @@ impl<T: ReadCopy> ReadCopy for MaybeUninit<T>{
     }
 }
 
-impl<T: ReadCopy,const N: usize> ReadCopy for [T;N]{
-    fn read<S: DataInput + ?Sized>(din: &mut S) -> Result<Self> {
-        let mut ret: MaybeUninit<[T;N]> = MaybeUninit::uninit();
-        for i in 0..N{
-            unsafe{ ((ret.as_mut_ptr() as *mut T).offset( i as isize) as *mut T).write(T::read(din)?)};
-        }
-        Ok(unsafe{ret.assume_init()})
+macro_rules! impl_read_copy_for_arrays{
+    [$($n:literal)*] => {
+        $(impl<T: ReadCopy> ReadCopy for [T;$n]{
+            fn read<S: DataInput + ?Sized>(din: &mut S) -> Result<Self>{
+                let mut arr = MaybeUninit::uninit();
+                unsafe{
+                    for i: isize in 0..$n{
+                        arr.as_mut_ptr().cast::<T>().offset(i).write(T::read(din)?)
+                    }
+                    Ok(arr.assume_init())
+                }
+            }
+        })*
     }
 }
+
+impl_read_copy_for_arrays![0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32];
+
+
 
 impl<T: ReadCopy> ReadCopy for Box<T>{
     fn read<S: DataInput + ?Sized>(din: &mut S) -> Result<Self> {
@@ -199,88 +204,97 @@ impl<T: Readable + ?Sized> Readable for Box<T>{
     }
 }
 
-impl<A: ReadCopy> ReadCopy for (){
-    fn read<S: DataInput + ?Sized>(_: &mut S) -> Result<Self>{
-        Ok(())
+macro_rules! impl_read_copy_for_tuple{
+    ($($i:ident,)* $last:ident) =>{
+        impl<$($i: ReadCopy),*$last: ReadCopy> ReadCopy for ($($i,)* $last){
+            pub fn read<S: DataInput + ?Sized>(din: &mut S) -> Result<Self>{
+                Ok(($($i ::read(din)?,)* $last ::read(din)?))
+            }
+        }
+    }
+    () => {
+        impl ReadCopy for (){
+            pub fn read<S: DataInput + ?Sized>(din: &mut S) -> Result<()>{
+                Ok(())
+            }
+        }
     }
 }
 
-impl<A: ReadCopy> ReadCopy for (A,){
-    fn read<S: DataInput + ?Sized>(din: &mut S) -> Result<Self> {
-        Ok((A::read(din)?,))
+macro_rules! impl_readable_for_tuple{
+    ($($i:ident,)* $last:ident) =>{
+        impl<$($i: Readable),*$last: Readable + ?Sized> Readable for ($($i,)* $last){
+            pub fn read_from<S: DataInput + ?Sized>(&mut self,din: &mut S) -> Result<()>{
+                let ($($i,)*$last) = self;
+                $($i .read_from(din)?;)*
+                $last .read_from(din)?;
+                Ok(())
+            }
+        }
+    }
+    () => {
+        impl Readable for (){
+            pub fn read_from<S: DataInput + ?Sized>(&mut self,din: &mut S) -> Result<()>{
+                Ok(())
+            }
+        }
     }
 }
 
-impl<A: ReadCopy,B: ReadCopy> ReadCopy for (A,B){
-    fn read<S: DataInput + ?Sized>(din: &mut S) -> Result<Self> {
-        Ok((A::read(din)?,B::read(din)?))
+macro_rules! impl_writable_for_tuple{
+    ($($i:ident,)*$last:ident) =>{
+        impl<$($i: Writable),*$last: Writable + ?Sized> Writable for ($($i,)* $last){
+            pub fn write<S: DataInput + ?Sized>(&mut self,din: &mut S) -> Result<()>{
+                let ($($i,)*$last) = self;
+                $($i .write(din)?;)*
+                $last .write(din)?;
+                Ok(())
+            }
+        }
+    }
+    () => {
+        impl Writable for (){
+            pub fn read_from<S: DataInput + ?Sized>(&mut self,din: &mut S) -> Result<()>{
+                Ok(())
+            }
+        }
     }
 }
 
-impl<A: ReadCopy,B: ReadCopy,C: ReadCopy> ReadCopy for (A,B,C){
-    fn read<S: DataInput + ?Sized>(din: &mut S) -> Result<Self> {
-        Ok((A::read(din)?,B::read(din)?,C::read(din)?))
+macro_rules! impl_io_for_tuple{
+    ($($i:ident),*) =>{
+        impl_read_copy_for_tuple!($($i),*);
+        impl_readable_for_tuple!($($i),*);
+        impl_writable_for_tuple!($($i),*);
     }
 }
 
-impl<A: ReadCopy,B: ReadCopy,C: ReadCopy,D: ReadCopy> ReadCopy for (A,B,C,D){
-    fn read<S: DataInput + ?Sized>(din: &mut S) -> Result<Self> {
-        Ok((A::read(din)?,B::read(din)?,C::read(din)?,D::read(din)?))
-    }
-}
+impl_io_for_tuple!();
+impl_io_for_tuple!(A);
+impl_io_for_tuple!(A,B);
+impl_io_for_tuple!(A,B,C);
+impl_io_for_tuple!(A,B,C,D);
+impl_io_for_tuple!(A,B,C,D,E);
+impl_io_for_tuple!(A,B,C,D,E,F);
+impl_io_for_tuple!(A,B,C,D,E,F,G);
+impl_io_for_tuple!(A,B,C,D,E,F,G,H);
+impl_io_for_tuple!(A,B,C,D,E,F,G,H,J);
+impl_io_for_tuple!(A,B,C,D,E,F,G,H,J,K);
+impl_io_for_tuple!(A,B,C,D,E,F,G,H,J,K,L);
+impl_io_for_tuple!(A,B,C,D,E,F,G,H,J,K,L,M);
 
-impl Readable for (){
-    fn read_from<S: DataInput + ?Sized>(&mut self, din: &mut S) -> Result<()> {
-        Ok(())
-    }
-}
-
-impl<A: Readable + ?Sized> Readable for (A,){
-    fn read_from<S: DataInput + ?Sized>(&mut self, din: &mut S) -> Result<()> {
-        let (a,) = self;
-        a.read_into(din)
-    }
-}
-
-impl<A: Readable + ?Sized,B: Readable> Readable for (B,A){
-    fn read_from<S: DataInput + ?Sized>(&mut self, din: &mut S) -> Result<()> {
-        let (b,a) = self;
-        b.read_into(din)?;
-        a.read_into(din)
-    }
-}
-
-impl<A: Readable + ?Sized,B: Readable,C: Readable> Readable for (B,C,A){
-    fn read_from<S: DataInput + ?Sized>(&mut self, din: &mut S) -> Result<()> {
-        let (b,c,a) = self;
-        b.read_into(din)?;
-        c.read_into(din)?;
-        a.read_into(din)
-    }
-}
-
-impl<A: Readable + ?Sized,B: Readable,C: Readable,D: Readable> Readable for (B,C,D,A){
-    fn read_from<S: DataInput + ?Sized>(&mut self, din: &mut S) -> Result<()> {
-        let (b,c,d,a) = self;
-        b.read_into(din)?;
-        c.read_into(din)?;
-        d.read_into(din)?;
-        a.read_into(din)
-    }
-}
-
-pub struct DataInputStream<'a,I: Read + ?Sized + 'a>{
-    read: &'a I,
+pub struct DataInputStream<I: Read>{
+    read: I,
     order: Endianess
 }
 
-impl<'a,I: Read + ?Sized + 'a> DataInputStream<'a,I>{
-    pub fn new(read: &'a I,order: Endianess) -> Self{
+impl<I: Read> DataInputStream<I>{
+    pub fn new(read: I,order: Endianess) -> Self{
         Self{read,order}
     }
 }
 
-impl<'a,I: Read + ?Sized + 'a> DataInput for DataInputStream<'a,I>{
+impl<I: Read> DataInput for DataInputStream<I>{
     fn read_fully(&mut self, out: &mut [u8]) -> Result<()> {
         if self.read.read(out)? < out.len(){
             Err("Unexpected EOF in read_fully".to_string())
@@ -306,7 +320,7 @@ impl<'a,I: Read + ?Sized + 'a> DataInput for DataInputStream<'a,I>{
 
 pub use std::io::Result as IOResult;
 
-impl<'a,I: Read +?Sized +'a> Read for DataInputStream<'a,I>{
+impl<I: Read> Read for DataInputStream<I>{
     fn read(&mut self, buf: &mut [u8]) -> IOResult<usize> {
         self.read.read(buf)
     }
@@ -358,31 +372,21 @@ impl Seek for ZeroDevice{
     }
 }
 
-impl<A: Readable + ?Sized,S: DataInput + ?Sized> Shr<&mut A> for &mut S{
-    type Output = Self;
 
-    fn shr(self, rhs: &mut A) -> Self::Output{
-        if let Err(s) = rhs.read_from(self){
-            panic!(s);
-        }
-        self
-    }
-}
-
-pub struct VerifyingReader<'a,'b,I: Read + 'a + ?Sized>{
-    reader: &'a mut I,
+pub struct VerifyingReader<'b,I: Read>{
+    reader: I,
     verifier: Verifier<'b>
 }
 
-impl<'a,'b,I: Read + 'a + ?Sized> VerifyingReader<'a,'b,I>{
-    pub fn new(reader: &'a mut I,verifier: Verifier<'b>) -> Self{
+impl<'b,I: Read> VerifyingReader<'b,I>{
+    pub fn new(reader: I,verifier: Verifier<'b>) -> Self{
         Self{reader,verifier}
     }
     pub fn verify(&self,signature: &[u8]) -> std::result::Result<bool,ErrorStack>{
         self.verifier.verify(signature)
     }
 }
-impl<'a,'b,I: Read + 'a + ?Sized> Read for VerifyingReader<'a,'b,I>{
+impl<'b,I: Read> Read for VerifyingReader<'b,I>{
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         let sz = self.reader.read(buf)?;
         self.verifier.update(&buf[..sz])?;
@@ -397,31 +401,7 @@ pub trait DataOutput{
     fn byte_order(&self) -> Endianess;
 }
 
-pub struct DataOutputStream<'a,W: Write>{
-    w: &'a mut W,
-    endianess: Endianess
-}
 
-impl<'a,W: Write> DataOutputStream<'a,W>{
-    pub fn new(w: &'a mut W,endianess: Endianess) -> Self{
-        Self{w,endianess}
-    }
-}
-
-impl<'a,W: Write> DataOutput for DataOutputStream<'a,W>{
-    fn write_bytes(&mut self, bytes: &[u8]) -> Result<()> {
-        self.w.write(bytes)?;
-        Ok(())
-    }
-
-    fn write_single(&mut self, byte: u8) -> Result<()> {
-        self.write_bytes(std::slice::from_ref(&byte))
-    }
-
-    fn byte_order(&self) -> Endianess {
-        self.endianess
-    }
-}
 
 pub trait Writeable{
     fn write<S: DataOutput>(&self,out: &mut S) -> Result<()>;
@@ -439,26 +419,14 @@ impl<P: Primitive> Writeable for P{
 }
 
 impl Writeable for f32{
-    fn write<S: DataOutput>(&self, out: &mut S) -> Result<()> {
+    fn write<S: DataOutput + ?Sized>(&self, out: &mut S) -> Result<()> {
         self.to_bits().write(out)
     }
 }
 
 impl Writeable for f64{
-    fn write<S: DataOutput>(&self, out: &mut S) -> Result<()> {
+    fn write<S: DataOutput +?Sized>(&self, out: &mut S) -> Result<()> {
         self.to_bits().write(out)
-    }
-}
-
-impl<T: Writeable,const N: usize> Writeable for [T;N]{
-    fn write<S: DataOutput>(&self, out: &mut S) -> Result<()> {
-        self.iter().try_for_each(|s|s.write())
-    }
-
-    fn write_consume<S: DataOutput>(self,out: &mut S) -> Result<()>{
-        Ok(for t in self{
-            t.write_consume(out)?;
-        })
     }
 }
 
@@ -483,14 +451,13 @@ impl<St: AsRef<str> + ?Sized> Writeable for St{
     }
 }
 
-
-pub struct DataOutputStream<'a,I: Write + ?Sized + 'a>{
-    write: &'a mut I,
+pub struct DataOutputStream<I: Write>{
+    write: I,
     order: Endianess
 }
 
-impl<'a,I: Write +?Sized +'a> DataOutputStream<'a,I>{
-    pub fn new(write: &'a mut I,order: Endianness) -> Self{
+impl<'a,I: Write> DataOutputStream<I>{
+    pub fn new(write: I ,order: Endianness) -> Self{
         Self{write,order}
     }
     pub fn set_byte_order(&mut self,order: Endianness){
@@ -498,7 +465,7 @@ impl<'a,I: Write +?Sized +'a> DataOutputStream<'a,I>{
     }
 }
 
-impl<'a,I: Write +?Sized +'a> DataOutput for DataOutputStream<'a,I>{
+impl<I: Write> DataOutput for DataOutputStream<I>{
     fn write_bytes(&mut self, bytes: &[u8]) -> Result<()> {
         self.write.write(bytes).map_err(|e|e.to_string())
             .and_then(|s|if s==bytes.len(){return Ok(())}else{Err("Length Error".to_string())})
@@ -513,7 +480,7 @@ impl<'a,I: Write +?Sized +'a> DataOutput for DataOutputStream<'a,I>{
     }
 }
 
-impl<'a,I: Write + ?Sized + 'a> Write for DataOutputStream<'a,I>{
+impl<'a,I: Write> Write for DataOutputStream<I>{
     fn write(&mut self, buf: &[u8]) -> Result<usize> {
         self.write(buf)
     }

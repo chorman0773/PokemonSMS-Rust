@@ -9,7 +9,7 @@ pub struct Ability{
     loc: ResourceLocation,
     name: TextComponent,
     desc: TextComponent,
-    bus: Box<dyn EventHandler>
+    bus: Box<dyn EventHandler + 'static>
 }
 
 impl Ability{

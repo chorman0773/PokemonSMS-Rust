@@ -54,10 +54,8 @@ impl<'a> UserData for EventKeyWrapper<'a>{
 }
 
 pub trait Event {
-    type Key: EventKey;
-    type Params : for<'lua> rlua::ToLuaMulti<'lua>;
-    fn get_key(&self) -> &'static Self::Key;
-    fn get_params(&self) -> &Self::Params;
+    fn get_key(&self) -> &dyn EventKey;
+    fn get_params(&self) -> &dyn for<'lua> rlua::ToLuaMulti<'lua>;
 
 }
 

@@ -60,5 +60,5 @@ pub mod Battle{
         StatusMoveEffect,
         StatusMoveFailed
     }
-    impl EventKey for Move{}
+    impl EventKey for StatusCombat{}
 }
