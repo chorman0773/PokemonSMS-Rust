@@ -14,7 +14,7 @@ use crate::data::{DeserializeCopy, Deserializeable, Serializeable};
 /// A universally Unique Identifier,
 ///  in a format which can be serialized according to LCS 4
 #[allow(clippy::upper_case_acronyms)]
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Default)]
 pub struct UUID {
     low: u64,
     high: u64,
@@ -128,7 +128,7 @@ impl Serializeable for UUID {
     fn serialize<W: crate::data::DataOutput + ?Sized>(
         &self,
         output: &mut W,
-    ) -> crate::data::Result<()> {
+    ) -> std::io::Result<()> {
         self.high.serialize(output)?;
         self.low.serialize(output)
     }
@@ -138,7 +138,7 @@ impl Deserializeable for UUID {
     fn deserialize<R: crate::data::DataInput + ?Sized>(
         &mut self,
         input: &mut R,
-    ) -> crate::data::Result<()> {
+    ) -> std::io::Result<()> {
         self.high.deserialize(input)?;
         self.low.deserialize(input)
     }
@@ -147,7 +147,7 @@ impl Deserializeable for UUID {
 impl DeserializeCopy for UUID {
     fn deserialize_copy<R: crate::data::DataInput + ?Sized>(
         input: &mut R,
-    ) -> crate::data::Result<Self> {
+    ) -> std::io::Result<Self> {
         Ok(Self {
             high: u64::deserialize_copy(input)?,
             low: u64::deserialize_copy(input)?,

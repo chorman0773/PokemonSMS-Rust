@@ -1,7 +1,7 @@
 //! Support for the LCS4 version structure type
 //!
 
-use std::{num::NonZeroU16, ops::RangeBounds};
+use std::{fmt::Display, num::NonZeroU16, ops::RangeBounds};
 
 use crate::data::{DeserializeCopy, Deserializeable, OutOfRange, Serializeable};
 
@@ -14,11 +14,26 @@ pub struct Version {
 
 impl Version {
     ///
-    /// Obtains teh version from the given pair
-    pub const fn from_pair(major: NonZeroU16, minor: u8) -> Result<Self, OutOfRange<NonZeroU16>> {
+    /// Obtains the version from the given pair
+    pub const fn from_pair_nonzero(
+        major: NonZeroU16,
+        minor: u8,
+    ) -> Result<Self, OutOfRange<NonZeroU16>> {
         let maj = major.get();
         if maj > 256 {
             Err(OutOfRange(major))
+        } else {
+            Ok(Self {
+                fields: [(maj - 1) as u8, minor],
+            })
+        }
+    }
+
+    ///
+    /// Obtains the version from the given pair
+    pub const fn from_pair(maj: u16, minor: u8) -> Result<Self, OutOfRange<u16>> {
+        if maj > 256 || maj == 0 {
+            Err(OutOfRange(maj))
         } else {
             Ok(Self {
                 fields: [(maj - 1) as u8, minor],
@@ -80,11 +95,17 @@ impl Version {
     }
 }
 
+impl Display for Version {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("{}.{}", self.major(), self.minor()))
+    }
+}
+
 impl Serializeable for Version {
     fn serialize<W: crate::data::DataOutput + ?Sized>(
         &self,
         output: &mut W,
-    ) -> crate::data::Result<()> {
+    ) -> std::io::Result<()> {
         self.fields.serialize(output)
     }
 }
@@ -93,7 +114,7 @@ impl Deserializeable for Version {
     fn deserialize<R: crate::data::DataInput + ?Sized>(
         &mut self,
         input: &mut R,
-    ) -> crate::data::Result<()> {
+    ) -> std::io::Result<()> {
         self.fields.deserialize(input)
     }
 }
@@ -101,7 +122,7 @@ impl Deserializeable for Version {
 impl DeserializeCopy for Version {
     fn deserialize_copy<R: crate::data::DataInput + ?Sized>(
         input: &mut R,
-    ) -> crate::data::Result<Self> {
+    ) -> std::io::Result<Self> {
         Ok(Self {
             fields: <[u8; 2]>::deserialize_copy(input)?,
         })

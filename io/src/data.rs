@@ -1,62 +1,18 @@
 //! Implementation of LCS4 IO for
 
 pub use std::io::Error as IoError;
-use std::{error::Error as StdError, io::Seek, mem::MaybeUninit, rc::Rc, sync::Arc};
+use std::{
+    error::Error as StdError,
+    io::{ErrorKind, Seek},
+    mem::MaybeUninit,
+    rc::Rc,
+    sync::Arc,
+};
 use std::{
     fmt::Display,
     io::{Read, Write},
     slice,
 };
-
-///
-/// The error type returned from Binary IO functions
-#[derive(Debug)]
-pub enum Error {
-    /// An error indicating that a multibyte read was interrupted by an end of file
-    EndOfFile,
-    /// An error indicating that an IO operation performed during a read or write caused an error
-    IoError(IoError),
-    /// An error indicating that some type's validity requirements were not met
-    ValidationError(Box<dyn StdError>),
-}
-
-impl Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Error::EndOfFile => f.write_str("Unexpected End of file"),
-            Error::IoError(e) => e.fmt(f),
-            Error::ValidationError(b) => b.fmt(f),
-        }
-    }
-}
-
-impl StdError for Error {}
-
-impl From<IoError> for Error {
-    fn from(x: IoError) -> Self {
-        Self::IoError(x)
-    }
-}
-
-impl Error {
-    /// Indicates that some I/O operation failed
-    pub fn validation_error<T: StdError + 'static>(x: T) -> Self {
-        Self::ValidationError(Box::from(x))
-    }
-}
-
-/// The result type produced by this library
-pub type Result<T> = std::result::Result<T, Error>;
-
-///
-/// Validates the given input by running a FnOnce
-/// The resulting error is converted
-pub fn validate<T, U, E: StdError + 'static, F: FnOnce(T) -> std::result::Result<U, E>>(
-    input: T,
-    f: F,
-) -> Result<U> {
-    f(input).map_err(Error::validation_error)
-}
 
 /// An enumeration that stores the possible byte order modes as specified by LCS4
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -90,16 +46,19 @@ pub trait DataInput: Read {
     ///
     /// Reads exactly bytes.len() bytes into bytes.
     /// Returns an error if an End of File prevents reading the entire array.
-    fn read_fully(&mut self, bytes: &mut [u8]) -> Result<()> {
+    fn read_fully(&mut self, bytes: &mut [u8]) -> std::io::Result<()> {
         let len = <Self as Read>::read(self, bytes)?;
         if len != bytes.len() {
-            Err(Error::EndOfFile)
+            Err(std::io::Error::new(
+                ErrorKind::UnexpectedEof,
+                "Unexpected EOF in read_fully",
+            ))
         } else {
             Ok(())
         }
     }
     /// Reads a single byte, and returns it, or an error if a byte cannot be read
-    fn read_byte(&mut self) -> Result<u8> {
+    fn read_byte(&mut self) -> std::io::Result<u8> {
         let mut ret = 0u8;
         self.read_fully(slice::from_mut(&mut ret))?;
         Ok(ret)
@@ -119,11 +78,11 @@ impl<R: DataInput> DataInput for &mut R {
         R::set_byte_order(self, order)
     }
 
-    fn read_fully(&mut self, bytes: &mut [u8]) -> Result<()> {
+    fn read_fully(&mut self, bytes: &mut [u8]) -> std::io::Result<()> {
         R::read_fully(self, bytes)
     }
 
-    fn read_byte(&mut self) -> Result<u8> {
+    fn read_byte(&mut self) -> std::io::Result<u8> {
         R::read_byte(self)
     }
 }
@@ -137,11 +96,11 @@ impl<R: DataInput> DataInput for Box<R> {
         R::set_byte_order(self, order)
     }
 
-    fn read_fully(&mut self, bytes: &mut [u8]) -> Result<()> {
+    fn read_fully(&mut self, bytes: &mut [u8]) -> std::io::Result<()> {
         R::read_fully(self, bytes)
     }
 
-    fn read_byte(&mut self) -> Result<u8> {
+    fn read_byte(&mut self) -> std::io::Result<u8> {
         R::read_byte(self)
     }
 }
@@ -199,23 +158,23 @@ impl<R: Read + Seek + ?Sized> Seek for DataInputStream<R> {
 /// A trait for types which can be deserialized from a stream of bytes according to LCS 4
 pub trait Deserializeable {
     /// Deserializes the bytes on the stream and stores the result in self or returns an error
-    fn deserialize<R: DataInput + ?Sized>(&mut self, input: &mut R) -> Result<()>;
+    fn deserialize<R: DataInput + ?Sized>(&mut self, input: &mut R) -> std::io::Result<()>;
 }
 
 impl<T: Deserializeable + ?Sized> Deserializeable for &mut T {
-    fn deserialize<R: DataInput + ?Sized>(&mut self, input: &mut R) -> Result<()> {
+    fn deserialize<R: DataInput + ?Sized>(&mut self, input: &mut R) -> std::io::Result<()> {
         T::deserialize(self, input)
     }
 }
 
 impl<T: Deserializeable + ?Sized> Deserializeable for Box<T> {
-    fn deserialize<R: DataInput + ?Sized>(&mut self, input: &mut R) -> Result<()> {
+    fn deserialize<R: DataInput + ?Sized>(&mut self, input: &mut R) -> std::io::Result<()> {
         T::deserialize(self, input)
     }
 }
 
 impl<T: Deserializeable> Deserializeable for [T] {
-    fn deserialize<R: DataInput + ?Sized>(&mut self, input: &mut R) -> Result<()> {
+    fn deserialize<R: DataInput + ?Sized>(&mut self, input: &mut R) -> std::io::Result<()> {
         for r in self {
             r.deserialize(input)?;
         }
@@ -224,13 +183,13 @@ impl<T: Deserializeable> Deserializeable for [T] {
 }
 
 impl<T: Deserializeable, const N: usize> Deserializeable for [T; N] {
-    fn deserialize<R: DataInput + ?Sized>(&mut self, input: &mut R) -> Result<()> {
+    fn deserialize<R: DataInput + ?Sized>(&mut self, input: &mut R) -> std::io::Result<()> {
         <[T]>::deserialize(self, input)
     }
 }
 
 impl<T: Deserializeable> Deserializeable for Option<T> {
-    fn deserialize<R: DataInput + ?Sized>(&mut self, input: &mut R) -> Result<()> {
+    fn deserialize<R: DataInput + ?Sized>(&mut self, input: &mut R) -> std::io::Result<()> {
         match self {
             Some(t) => t.deserialize(input),
             None => Ok(()),
@@ -243,18 +202,18 @@ impl<T: Deserializeable> Deserializeable for Option<T> {
 /// It's intended that this impl should be more efficient then creating a new instance, then reading into it
 pub trait DeserializeCopy: Deserializeable + Sized {
     /// Deserializes the bytes on the stream and returns the resulting value or an error
-    fn deserialize_copy<R: DataInput + ?Sized>(input: &mut R) -> Result<Self>;
+    fn deserialize_copy<R: DataInput + ?Sized>(input: &mut R) -> std::io::Result<Self>;
 }
 
 impl<T: DeserializeCopy> DeserializeCopy for Box<T> {
-    fn deserialize_copy<R: DataInput + ?Sized>(input: &mut R) -> Result<Self> {
+    fn deserialize_copy<R: DataInput + ?Sized>(input: &mut R) -> std::io::Result<Self> {
         T::deserialize_copy(input).map(Box::new)
     }
 }
 
 // MCG too OP
 impl<T: DeserializeCopy, const N: usize> DeserializeCopy for [T; N] {
-    fn deserialize_copy<R: DataInput + ?Sized>(input: &mut R) -> Result<Self> {
+    fn deserialize_copy<R: DataInput + ?Sized>(input: &mut R) -> std::io::Result<Self> {
         let mut uninit = MaybeUninit::<[T; N]>::uninit();
         let ptr = uninit.as_mut_ptr().cast::<T>();
         for i in 0..N {
@@ -275,12 +234,12 @@ impl<T: DeserializeCopy, const N: usize> DeserializeCopy for [T; N] {
 pub trait DataOutput: Write {
     ///
     /// Writes all of `bytes` to the underlying stream or returns an error
-    fn write_bytes(&mut self, bytes: &[u8]) -> Result<()> {
+    fn write_bytes(&mut self, bytes: &[u8]) -> std::io::Result<()> {
         Ok(self.write_all(bytes)?)
     }
     ///
     /// Writes byte to the underlying stream or returns an error
-    fn write_byte(&mut self, byte: u8) -> Result<()> {
+    fn write_byte(&mut self, byte: u8) -> std::io::Result<()> {
         self.write_bytes(slice::from_ref(&byte))
     }
     ///
@@ -349,40 +308,40 @@ impl<W: Write + Seek + ?Sized> Seek for DataOutputStream<W> {
 pub trait Serializeable {
     ///
     /// Serializes the type to the stream
-    fn serialize<W: DataOutput + ?Sized>(&self, output: &mut W) -> Result<()>;
+    fn serialize<W: DataOutput + ?Sized>(&self, output: &mut W) -> std::io::Result<()>;
 }
 
 impl<T: Serializeable + ?Sized> Serializeable for &T {
-    fn serialize<W: DataOutput + ?Sized>(&self, output: &mut W) -> Result<()> {
+    fn serialize<W: DataOutput + ?Sized>(&self, output: &mut W) -> std::io::Result<()> {
         T::serialize(self, output)
     }
 }
 impl<T: Serializeable + ?Sized> Serializeable for &mut T {
-    fn serialize<W: DataOutput + ?Sized>(&self, output: &mut W) -> Result<()> {
+    fn serialize<W: DataOutput + ?Sized>(&self, output: &mut W) -> std::io::Result<()> {
         T::serialize(self, output)
     }
 }
 
 impl<T: Serializeable + ?Sized> Serializeable for Box<T> {
-    fn serialize<W: DataOutput + ?Sized>(&self, output: &mut W) -> Result<()> {
+    fn serialize<W: DataOutput + ?Sized>(&self, output: &mut W) -> std::io::Result<()> {
         T::serialize(self, output)
     }
 }
 
 impl<T: Serializeable + ?Sized> Serializeable for Rc<T> {
-    fn serialize<W: DataOutput + ?Sized>(&self, output: &mut W) -> Result<()> {
+    fn serialize<W: DataOutput + ?Sized>(&self, output: &mut W) -> std::io::Result<()> {
         T::serialize(self, output)
     }
 }
 
 impl<T: Serializeable + ?Sized> Serializeable for Arc<T> {
-    fn serialize<W: DataOutput + ?Sized>(&self, output: &mut W) -> Result<()> {
+    fn serialize<W: DataOutput + ?Sized>(&self, output: &mut W) -> std::io::Result<()> {
         T::serialize(self, output)
     }
 }
 
 impl<T: Serializeable> Serializeable for [T] {
-    fn serialize<W: DataOutput + ?Sized>(&self, output: &mut W) -> Result<()> {
+    fn serialize<W: DataOutput + ?Sized>(&self, output: &mut W) -> std::io::Result<()> {
         for t in self {
             t.serialize(output)?;
         }
@@ -391,7 +350,7 @@ impl<T: Serializeable> Serializeable for [T] {
 }
 
 impl<T: Serializeable, const N: usize> Serializeable for [T; N] {
-    fn serialize<W: DataOutput + ?Sized>(&self, output: &mut W) -> Result<()> {
+    fn serialize<W: DataOutput + ?Sized>(&self, output: &mut W) -> std::io::Result<()> {
         for t in self {
             t.serialize(output)?;
         }
@@ -400,7 +359,7 @@ impl<T: Serializeable, const N: usize> Serializeable for [T; N] {
 }
 
 impl<T: Serializeable> Serializeable for Option<T> {
-    fn serialize<W: DataOutput + ?Sized>(&self, output: &mut W) -> Result<()> {
+    fn serialize<W: DataOutput + ?Sized>(&self, output: &mut W) -> std::io::Result<()> {
         match self {
             Some(v) => v.serialize(output),
             None => Ok(()),
@@ -409,19 +368,19 @@ impl<T: Serializeable> Serializeable for Option<T> {
 }
 
 impl Deserializeable for u8 {
-    fn deserialize<R: DataInput + ?Sized>(&mut self, input: &mut R) -> Result<()> {
+    fn deserialize<R: DataInput + ?Sized>(&mut self, input: &mut R) -> std::io::Result<()> {
         input.read_fully(slice::from_mut(self))
     }
 }
 
 impl DeserializeCopy for u8 {
-    fn deserialize_copy<R: DataInput + ?Sized>(input: &mut R) -> Result<Self> {
+    fn deserialize_copy<R: DataInput + ?Sized>(input: &mut R) -> std::io::Result<Self> {
         input.read_byte()
     }
 }
 
 impl Deserializeable for i8 {
-    fn deserialize<R: DataInput + ?Sized>(&mut self, input: &mut R) -> Result<()> {
+    fn deserialize<R: DataInput + ?Sized>(&mut self, input: &mut R) -> std::io::Result<()> {
         // SAFETY:
         // the pointer is from self
         // i8 and u8 have the same size, alignment, and representation
@@ -432,19 +391,19 @@ impl Deserializeable for i8 {
 }
 
 impl DeserializeCopy for i8 {
-    fn deserialize_copy<R: DataInput + ?Sized>(input: &mut R) -> Result<Self> {
+    fn deserialize_copy<R: DataInput + ?Sized>(input: &mut R) -> std::io::Result<Self> {
         input.read_byte().map(|u| u as i8)
     }
 }
 
 impl Serializeable for u8 {
-    fn serialize<W: DataOutput + ?Sized>(&self, input: &mut W) -> Result<()> {
+    fn serialize<W: DataOutput + ?Sized>(&self, input: &mut W) -> std::io::Result<()> {
         input.write_byte(*self)
     }
 }
 
 impl Serializeable for i8 {
-    fn serialize<W: DataOutput + ?Sized>(&self, input: &mut W) -> Result<()> {
+    fn serialize<W: DataOutput + ?Sized>(&self, input: &mut W) -> std::io::Result<()> {
         input.write_byte(*self as u8)
     }
 }
@@ -452,17 +411,17 @@ impl Serializeable for i8 {
 macro_rules! impl_for_tuples{
     () => {
         impl Deserializeable for (){
-            fn deserialize<S: DataInput + ?Sized>(&mut self,_: &mut S) -> Result<()>{
+            fn deserialize<S: DataInput + ?Sized>(&mut self,_: &mut S) -> std::io::Result<()>{
                 Ok(())
             }
         }
         impl DeserializeCopy for (){
-            fn deserialize_copy<S: DataInput + ?Sized>(_: &mut S) -> Result<()>{
+            fn deserialize_copy<S: DataInput + ?Sized>(_: &mut S) -> std::io::Result<()>{
                 Ok(())
             }
         }
         impl Serializeable for (){
-            fn serialize<S: DataOutput + ?Sized>(&self,_: &mut S) -> Result<()>{
+            fn serialize<S: DataOutput + ?Sized>(&self,_: &mut S) -> std::io::Result<()>{
                 Ok(())
             }
         }
@@ -470,20 +429,20 @@ macro_rules! impl_for_tuples{
     ($a:ident) => {
         #[allow(non_snake_case)]
         impl<$a : Deserializeable + ?Sized> Deserializeable for ($a ,){
-            fn deserialize<S: DataInput + ?Sized>(&mut self,input: &mut S) -> Result<()>{
+            fn deserialize<S: DataInput + ?Sized>(&mut self,input: &mut S) -> std::io::Result<()>{
                 let ($a,) = self;
                 $a.deserialize(input)
             }
         }
         #[allow(non_snake_case)]
         impl<$a : DeserializeCopy> DeserializeCopy for ($a ,){
-            fn deserialize_copy<S: DataInput + ?Sized>(input: &mut S) -> Result<Self>{
+            fn deserialize_copy<S: DataInput + ?Sized>(input: &mut S) -> std::io::Result<Self>{
                 Ok((<$a>::deserialize_copy(input)?,))
             }
         }
         #[allow(non_snake_case)]
         impl<$a : Serializeable + ?Sized> Serializeable for ($a ,){
-            fn serialize<S: DataOutput + ?Sized>(&self,input: &mut S) -> Result<()>{
+            fn serialize<S: DataOutput + ?Sized>(&self,input: &mut S) -> std::io::Result<()>{
                 let ($a,) = self;
                 $a.serialize(input)
             }
@@ -492,7 +451,7 @@ macro_rules! impl_for_tuples{
     ($($leading:ident),+) => {
         #[allow(non_snake_case)]
         impl<$($leading: Deserializeable),+ +?Sized> Deserializeable for ($($leading),+){
-            fn deserialize<S: DataInput + ?Sized>(&mut self,input: &mut S) -> Result<()>{
+            fn deserialize<S: DataInput + ?Sized>(&mut self,input: &mut S) -> std::io::Result<()>{
                 let ($($leading),+,) = self;
                 $({$leading .deserialize(input)?})*
                 Ok(())
@@ -500,13 +459,13 @@ macro_rules! impl_for_tuples{
         }
         #[allow(non_snake_case)]
         impl<$($leading: DeserializeCopy),*> DeserializeCopy for ($($leading),* ){
-            fn deserialize_copy<S: DataInput + ?Sized>(input: &mut S) -> Result<Self>{
+            fn deserialize_copy<S: DataInput + ?Sized>(input: &mut S) -> std::io::Result<Self>{
                 Ok(($($leading::deserialize_copy(input)?),*))
             }
         }
         #[allow(non_snake_case)]
         impl<$($leading: Serializeable),+ +?Sized> Serializeable for ($($leading),+){
-            fn serialize<S: DataOutput + ?Sized>(&self,input: &mut S) -> Result<()>{
+            fn serialize<S: DataOutput + ?Sized>(&self,input: &mut S) -> std::io::Result<()>{
                 let ($($leading),+,) = self;
                 $({$leading .serialize(input)?})*
                 Ok(())
@@ -533,7 +492,7 @@ macro_rules! impl_for_primitives{
     [$($ty:ty),+] => {
         $(
             impl Deserializeable for $ty{
-                fn deserialize<R: DataInput + ?Sized>(&mut self,input: &mut R) -> Result<()>{
+                fn deserialize<R: DataInput + ?Sized>(&mut self,input: &mut R) -> std::io::Result<()>{
                     let mut bytes = [0u8;std::mem::size_of::<$ty>()];
                     input.read_fully(&mut bytes)?;
                     *self = match input.byte_order(){
@@ -544,7 +503,7 @@ macro_rules! impl_for_primitives{
                 }
             }
             impl DeserializeCopy for $ty{
-                fn deserialize_copy<R: DataInput + ?Sized>(input: &mut R) -> Result<Self>{
+                fn deserialize_copy<R: DataInput + ?Sized>(input: &mut R) -> std::io::Result<Self>{
                     let mut bytes = [0u8;std::mem::size_of::<$ty>()];
                     input.read_fully(&mut bytes)?;
                     Ok(match input.byte_order(){
@@ -554,7 +513,7 @@ macro_rules! impl_for_primitives{
                 }
             }
             impl Serializeable for $ty{
-                fn serialize<W: DataOutput + ?Sized>(&self,output: &mut W) -> Result<()>{
+                fn serialize<W: DataOutput + ?Sized>(&self,output: &mut W) -> std::io::Result<()>{
                     let bytes = match output.byte_order(){
                         ByteOrder::BigEndian => <$ty>::to_be_bytes(*self),
                         ByteOrder::LittleEndian => <$ty>::to_le_bytes(*self)
@@ -569,21 +528,22 @@ macro_rules! impl_for_primitives{
 impl_for_primitives![i16, u16, i32, u32, i64, u64, i128, u128, f32, f64];
 
 impl Deserializeable for String {
-    fn deserialize<R: DataInput + ?Sized>(&mut self, input: &mut R) -> Result<()> {
+    fn deserialize<R: DataInput + ?Sized>(&mut self, input: &mut R) -> std::io::Result<()> {
         let size = u16::deserialize_copy(input)? as usize;
         let mut vec = vec![0u8; size];
         input.read_fully(&mut vec)?;
-        *self = validate(vec, String::from_utf8)?;
+        *self =
+            String::from_utf8(vec).map_err(|e| std::io::Error::new(ErrorKind::InvalidData, e))?;
         Ok(())
     }
 }
 
 impl DeserializeCopy for String {
-    fn deserialize_copy<R: DataInput + ?Sized>(input: &mut R) -> Result<Self> {
+    fn deserialize_copy<R: DataInput + ?Sized>(input: &mut R) -> std::io::Result<Self> {
         let size = u16::deserialize_copy(input)? as usize;
         let mut vec = vec![0u8; size];
         input.read_fully(&mut vec)?;
-        validate(vec, String::from_utf8)
+        String::from_utf8(vec).map_err(|e| std::io::Error::new(ErrorKind::InvalidData, e))
     }
 }
 
@@ -604,10 +564,13 @@ impl<T: Display> Display for OutOfRange<T> {
 impl<T> StdError for OutOfRange<T> where Self: std::fmt::Debug + Display {}
 
 impl Serializeable for String {
-    fn serialize<W: DataOutput + ?Sized>(&self, output: &mut W) -> Result<()> {
+    fn serialize<W: DataOutput + ?Sized>(&self, output: &mut W) -> std::io::Result<()> {
         let size = self.len();
         if size > u16::MAX as usize {
-            Err(Error::validation_error(OutOfRange(size)))
+            Err(std::io::Error::new(
+                ErrorKind::InvalidData,
+                OutOfRange(size),
+            ))
         } else {
             (size as u16).serialize(output)?;
             output.write_bytes(self.as_bytes())
