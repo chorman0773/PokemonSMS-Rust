@@ -11,6 +11,9 @@ serde = {version="1.0.111",optional=true}
 rand = {version="0.8",optional=true}
 uuid = {version="0.8.2",optional=true}
 fake-enum = "0.1.2"
+cryptostream = {version = "0.3",optional=true}
+openssl = { version = "0.10", features = ["vendored"], optional=true}
+zeroize = {version="1.1.0",optional=true}
 
 [features]
 nbt = []
@@ -18,3 +21,4 @@ shade = ["nbt"]
 random_uuid = ["rand"]
 uuid_v1 = ["uuid","uuid/v1","rand"]
 default = ["nbt"]
+crypto_shade = ["shade","cryptostream","openssl","zeroize"]

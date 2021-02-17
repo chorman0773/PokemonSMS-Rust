@@ -6,8 +6,14 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
+use openssl::symm::Cipher;
+use zeroize::Zeroizing;
+
 use crate::{
-    data::{ByteOrder, DeserializeCopy, Deserializeable, Serializeable},
+    data::{
+        ByteOrder, DataInput, DataInputStream, DataOutput, DataOutputStream, DeserializeCopy,
+        Deserializeable, OutOfRange, Serializeable,
+    },
     nbt::compound::NbtCompound,
     version::Version,
 };
@@ -38,6 +44,10 @@ pub mod consts {
     ///
     /// The magic number for a ShadeNBT file: "\xADNBT" or [AD 4E 42 54]
     pub const SHADE_MAGIC: [u8; 4] = [0xAD, 0x4E, 0x42, 0x54];
+
+    ///
+    /// The magic number for a CryptoShade file: "\xECNBT" or [EC 4E 42 54]
+    pub const CRYPTO_MAGIC: [u8; 4] = [0xEC, 0x4E, 0x42, 0x54];
 }
 
 impl ShadeFile {
@@ -120,6 +130,150 @@ impl ShadeFile {
             ByteOrder::BigEndian
         }
     }
+    ///
+    /// Reads and decrypts a CryptoShade file with a given password
+    #[cfg(feature = "crypto_shade")]
+    pub fn read_encrypted<R: DataInput + ?Sized>(
+        passwd: &[u8],
+        input: &mut R,
+    ) -> std::io::Result<Self> {
+        let magic = <[u8; 4]>::deserialize_copy(input)?;
+        if magic != consts::SHADE_MAGIC {
+            return Err(std::io::Error::new(
+                ErrorKind::InvalidData,
+                "Invalid magic (not a shade file)",
+            ));
+        }
+        let version = Version::deserialize_copy(input)?;
+        if consts::SHADE_VERSION < version {
+            return Err(std::io::Error::new(
+                ErrorKind::InvalidData,
+                format!("Version {} is not implemetented", version),
+            ));
+        }
+        let mut flags;
+        if consts::SHADE_FLAGS_VERSION < version {
+            flags = u8::deserialize_copy(input)?;
+            if (flags & !consts::SHADE_FLAGS_ACCEPTED_MASK) != 0 {
+                return Err(std::io::Error::new(
+                    ErrorKind::InvalidData,
+                    "Invalid flags in mask",
+                ));
+            }
+            flags &= consts::SHADE_FLAGS_MASK;
+        } else {
+            flags = 0;
+        }
+
+        if flags & 0x80 == 0 {
+            input.set_byte_order(ByteOrder::LittleEndian)
+        } else {
+            input.set_byte_order(ByteOrder::BigEndian)
+        }
+
+        let _ = u16::deserialize_copy(input)?;
+        let salt = <[u8; 32]>::deserialize_copy(input)?;
+        let iv = <[u8; 16]>::deserialize_copy(input)?;
+        let check = <[u8; 32]>::deserialize_copy(input)?;
+        let mut check_input = Zeroizing::new(Vec::with_capacity(passwd.len() + 8));
+        check_input.extend_from_slice(passwd);
+        check_input.extend_from_slice(&salt[..8]);
+        let mut check_output = Zeroizing::new(openssl::sha::sha256(&*check_input));
+        if !openssl::memcmp::eq(&*check_output, &check) {
+            return Err(std::io::Error::new(
+                ErrorKind::Other,
+                "Password Check Failed",
+            ));
+        }
+
+        check_input = Zeroizing::new(Vec::with_capacity(passwd.len() + 32));
+        check_input.extend_from_slice(passwd);
+        check_input.extend_from_slice(&salt);
+        check_output = Zeroizing::new(openssl::sha::sha256(&*check_input));
+
+        let reader =
+            cryptostream::read::Decryptor::new(input, Cipher::aes_256_cbc(), &*check_output, &iv)
+                .map_err(|e| std::io::Error::new(ErrorKind::Other, e))?;
+
+        let mode;
+        if (flags & 0x80) != 0 {
+            mode = ByteOrder::LittleEndian
+        } else {
+            mode = ByteOrder::BigEndian
+        }
+        let mut input = DataInputStream::new(reader, mode);
+        let compound = NbtCompound::deserialize_copy(&mut input)?;
+        Ok(Self {
+            magic,
+            version,
+            flags,
+            compound,
+        })
+    }
+
+    ///
+    /// Writes an encrypted CryptoShade file with a given password
+    #[cfg(feature = "crypto_shade")]
+    pub fn write_encrypted<W: DataOutput + ?Sized>(
+        &self,
+        passwd: &[u8],
+        output: &mut W,
+    ) -> std::io::Result<()> {
+        consts::CRYPTO_MAGIC.serialize(output)?;
+        self.version.serialize(output)?;
+        if consts::SHADE_FLAGS_VERSION < self.version {
+            self.flags.serialize(output)?;
+        }
+
+        let mut salt = [0u8; 32];
+        openssl::rand::rand_bytes(&mut salt)
+            .map_err(|e| std::io::Error::new(ErrorKind::Other, e))?;
+        let mut iv = [0u8; 16];
+        openssl::rand::rand_bytes(&mut iv).map_err(|e| std::io::Error::new(ErrorKind::Other, e))?;
+        let mut check_input = Zeroizing::new(Vec::with_capacity(passwd.len() + 8));
+        check_input.extend_from_slice(passwd);
+        check_input.extend_from_slice(&salt[..8]);
+        let check = openssl::sha::sha256(&*check_input);
+
+        check_input = Zeroizing::new(Vec::with_capacity(passwd.len() + 32));
+        check_input.extend_from_slice(passwd);
+        check_input.extend_from_slice(&salt);
+        let check_output = Zeroizing::new(openssl::sha::sha256(&*check_input));
+        let order;
+        if self.flags & 0x80 == 0 {
+            order = ByteOrder::LittleEndian
+        } else {
+            order = ByteOrder::BigEndian
+        }
+        let mut out_vec = Vec::<u8>::new();
+        {
+            let mut encryptor = cryptostream::write::Encryptor::new(
+                &mut out_vec,
+                Cipher::aes_256_cbc(),
+                &*check_output,
+                &iv,
+            )
+            .map_err(|e| std::io::Error::new(ErrorKind::Other, e))?;
+            let mut output = DataOutputStream::new(&mut encryptor, order);
+            self.compound.serialize(&mut output)?;
+            encryptor
+                .finish()
+                .map_err(|e| std::io::Error::new(ErrorKind::Other, e))?;
+        }
+        let num_blocks = out_vec.len() / 16;
+        if num_blocks > (u16::MAX as usize) {
+            return Err(std::io::Error::new(
+                ErrorKind::InvalidData,
+                OutOfRange(num_blocks),
+            ));
+        }
+
+        (num_blocks as u16).serialize(output)?;
+        salt.serialize(output)?;
+        iv.serialize(output)?;
+        check.serialize(output)?;
+        output.write_all(&out_vec)
+    }
 }
 
 impl Deref for ShadeFile {
@@ -141,6 +295,13 @@ impl Serializeable for ShadeFile {
         &self,
         output: &mut W,
     ) -> std::io::Result<()> {
+        #[cfg(feature = "crypto_shade")]
+        if self.magic == consts::CRYPTO_MAGIC {
+            return Err(std::io::Error::new(
+                ErrorKind::Other,
+                "Cannot serialize a CryptoShade file as a ShadeNBT file",
+            ));
+        }
         self.magic.serialize(output)?;
         self.version.serialize(output)?;
         if consts::SHADE_FLAGS_VERSION < self.version {
