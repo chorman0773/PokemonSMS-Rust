@@ -1,5 +1,8 @@
 [workspace]
 members = [
     "core",
-    "io"
+    "io",
+    "net",
+    "client-core",
+    "text"
 ]
