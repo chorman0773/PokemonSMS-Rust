@@ -10,10 +10,12 @@ pub struct TextDelay {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum TextComponent {
+    RawText(String),
     Text { text: String, style: Option<Style> },
     Translation { translate: String },
     Command(TextCommand),
-    Group(Vec<TextComponent>),
+    ImplicitGroup(Vec<TextComponent>),
+    Group { group: Vec<TextComponent> },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
