@@ -1,4 +1,3 @@
-use lazy_static::__Deref;
 use rlua::{prelude::*, Context, Value};
 
 use std::{
