@@ -1,13 +1,9 @@
+use fused_lock::FusedRwLock;
 use rlua::{prelude::*, Context, Value};
 
 use std::{
-    cell::UnsafeCell,
     collections::HashMap,
-    ops::Index,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        RwLock,
-    },
+    ops::{Deref, Index},
 };
 
 use crate::resource::ResourceLocation;
@@ -17,64 +13,39 @@ pub trait RegistryEntry {
 }
 
 pub struct Registry<E> {
-    lock: RwLock<()>,
-    underlying: UnsafeCell<HashMap<ResourceLocation, E>>,
-    locked: AtomicBool,
+    underlying: FusedRwLock<HashMap<ResourceLocation, E>>,
 }
 
 impl<E> Default for Registry<E> {
     fn default() -> Self {
-        Self {
-            lock: Default::default(),
-            underlying: Default::default(),
-            locked: Default::default(),
-        }
+        Self::new()
     }
 }
 
 impl<E> Registry<E> {
     pub fn new() -> Self {
-        Default::default()
-    }
-
-    fn get_if_locked(&self) -> Option<&HashMap<ResourceLocation, E>> {
-        if self.locked.load(Ordering::Acquire) {
-            // SAFETY:
-            // Because self.locked is set, the lock is never mutably borrowed.
-            Some(unsafe { &*(self.underlying.get() as *const HashMap<_, _>) })
-        } else {
-            None
+        Self {
+            underlying: FusedRwLock::new(HashMap::new()),
         }
     }
 
     pub fn lock(&self) {
-        let _guard = self.lock.read().unwrap();
-        self.locked.store(true, Ordering::Release);
+        self.underlying.lock()
     }
 
     pub fn get(&self, name: &ResourceLocation) -> Option<&E> {
-        self.get_if_locked().map(|m| m.get(name)).flatten()
+        self.underlying.try_read().map(|e| e.get(name)).flatten()
     }
 
     pub fn iter(&self) -> Iter<E> {
-        if self.locked.load(Ordering::Acquire) {
-            Iter(self.get_if_locked().map(HashMap::values))
-        } else {
-            Iter(None)
-        }
+        Iter(self.underlying.try_read().map(HashMap::values))
     }
 }
 
 impl<E> Index<&ResourceLocation> for Registry<E> {
     type Output = E;
     fn index(&self, k: &ResourceLocation) -> &E {
-        if self.locked.load(Ordering::Acquire) {
-            self.get(k).unwrap()
-        } else {
-            panic!(
-                "Cannot access a Registry that's not locked. Use Registry::create_object instead"
-            )
-        }
+        &self.underlying.read()[k]
     }
 }
 
@@ -97,18 +68,39 @@ impl<'a, E> IntoIterator for &'a Registry<E> {
 
 impl<E: RegistryEntry> Registry<E> {
     pub fn register(&self, val: E) -> Option<E> {
-        if self.locked.load(Ordering::Relaxed) {
-            Some(val)
-        } else {
-            let _guard = self.lock.write().unwrap();
-            if self.locked.load(Ordering::Relaxed) {
-                // SAFETY:
-                // Because self.lock is locked exclusively, it's safe to mutably borrow the interior.
-                unsafe { &mut *self.underlying.get() }.insert(val.registry_name().clone(), val)
-            } else {
-                Some(val)
-            }
+        if self.underlying.is_locked() {
+            return Some(val);
         }
+        if let Some(mut guard) = self.underlying.try_write() {
+            guard.insert(val.registry_name().clone(), val)
+        } else {
+            Some(val)
+        }
+    }
+
+    pub fn get_object(&self, key: ResourceLocation) -> RegistryObject<E> {
+        RegistryObject {
+            registry: self,
+            key,
+        }
+    }
+}
+
+pub struct RegistryObject<'a, E> {
+    registry: &'a Registry<E>,
+    key: ResourceLocation,
+}
+
+impl<'a, E: RegistryEntry> RegistryObject<'a, E> {
+    pub fn get(&self) -> Option<&E> {
+        self.registry.get(&self.key)
+    }
+}
+
+impl<'a, E: RegistryEntry> Deref for RegistryObject<'a, E> {
+    type Target = E;
+    fn deref(&self) -> &E {
+        &self.registry[&self.key]
     }
 }
 
@@ -117,15 +109,19 @@ impl<E: RegistryEntry + for<'lua> FromLua<'lua>> Registry<E> {
         &self,
         eval: rlua::Function<'lua>,
         _ctx: Context<'lua>,
-    ) -> rlua::Result<()> {
+    ) -> rlua::Result<bool> {
         let out: Value<'lua> = eval.call(())?;
-
+        if self.underlying.is_locked() {
+            return Ok(false);
+        }
         if let Value::Table(tbl) = out {
             for v in 1..=tbl.raw_len() {
                 let e = tbl.get(v)?;
-                self.register(e);
+                if self.register(e).is_some() {
+                    return Ok(false);
+                }
             }
-            Ok(())
+            Ok(true)
         } else {
             Err(rlua::Error::FromLuaConversionError {
                 from: "Value",
