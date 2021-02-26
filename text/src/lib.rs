@@ -1,10 +1,27 @@
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct TextDelay {
-    seconds: u64,
+    pub seconds: u64,
     #[serde(default)]
-    nanos: u32,
+    pub nanos: u32,
+}
+
+impl From<TextDelay> for Duration {
+    fn from(v: TextDelay) -> Duration {
+        Duration::new(v.seconds, v.nanos)
+    }
+}
+
+impl From<Duration> for TextDelay {
+    fn from(v: Duration) -> TextDelay {
+        TextDelay {
+            seconds: v.as_secs(),
+            nanos: v.subsec_nanos(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -57,4 +74,26 @@ pub enum Color {
     BrightMagenta,
     BrightCyan,
     White,
+}
+
+pub mod embed_json {
+    use super::TextComponent;
+    use serde::{Deserialize, Serialize};
+
+    pub fn serialize<S>(value: &TextComponent, ser: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let string =
+            serde_json::to_string(value).map_err(|e| <S::Error as serde::ser::Error>::custom(e))?;
+        string.serialize(ser)
+    }
+
+    pub fn deserialize<'de, D>(de: D) -> Result<TextComponent, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let str = <&str as Deserialize>::deserialize(de)?;
+        serde_json::from_str(str).map_err(|e| <D::Error as serde::de::Error>::custom(e))
+    }
 }
